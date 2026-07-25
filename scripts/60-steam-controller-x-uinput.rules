@@ -1,0 +1,12 @@
+# Grants the `input` group read/write access to /dev/uinput, which
+# sc-adapter needs to create its virtual Xbox-360-shaped gamepad.
+#
+# Installed by scripts/install-linux.sh to
+# /etc/udev/rules.d/60-steam-controller-x-uinput.rules
+#
+# The physical Steam Controller's own HID device does NOT need a rule
+# here -- modern systemd/udev already grants the active logind session
+# access to physically-plugged-in USB HID devices via the "uaccess" tag,
+# unlike /dev/uinput which is a virtual, always-present kernel device with
+# no session/seat concept.
+KERNEL=="uinput", GROUP="input", MODE="0660"

@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sc-protocol",
+    "crates/sc-hid",
+    "crates/sc-xinput",
+    "crates/sc-config",
+    "crates/sc-adapter",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/s3govesus/steam-controller-x"
+
+[workspace.dependencies]
+sc-protocol = { path = "crates/sc-protocol" }
+sc-hid = { path = "crates/sc-hid" }
+sc-xinput = { path = "crates/sc-xinput" }
+sc-config = { path = "crates/sc-config" }
+bitflags = "2"
+anyhow = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ctrlc = "3"
+hidapi = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+directories = "6"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }
+axum = { version = "0.8", features = ["ws"] }
