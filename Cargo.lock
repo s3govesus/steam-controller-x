@@ -862,7 +862,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sc-adapter"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "sc-config"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "directories",
@@ -895,16 +895,17 @@ dependencies = [
 
 [[package]]
 name = "sc-hid"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "hidapi",
  "thiserror 1.0.69",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
 name = "sc-protocol"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bitflags 2.13.1",
  "thiserror 1.0.69",
@@ -912,7 +913,7 @@ dependencies = [
 
 [[package]]
 name = "sc-xinput"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",

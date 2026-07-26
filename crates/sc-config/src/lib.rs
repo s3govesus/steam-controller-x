@@ -46,6 +46,10 @@ pub enum LogicalButton {
     /// with simultaneous other input).
     LeftStickCapTouch,
     LeftStickClick,
+    /// The real right *stick* click, distinct from [`Self::RightPadClick`]
+    /// (the right touchpad's press-force click) — see
+    /// [`sc_protocol::ButtonFlags::RIGHT_STICK_CLICK`].
+    RightStickClick,
     RightPadTouch,
     RightPadClick,
     DpadUp,
@@ -59,7 +63,7 @@ pub enum LogicalButton {
 }
 
 impl LogicalButton {
-    pub const ALL: [LogicalButton; 23] = [
+    pub const ALL: [LogicalButton; 24] = [
         LogicalButton::A,
         LogicalButton::B,
         LogicalButton::X,
@@ -73,6 +77,7 @@ impl LogicalButton {
         LogicalButton::RightStickCapTouch,
         LogicalButton::LeftStickCapTouch,
         LogicalButton::LeftStickClick,
+        LogicalButton::RightStickClick,
         LogicalButton::RightPadTouch,
         LogicalButton::RightPadClick,
         LogicalButton::DpadUp,
@@ -100,6 +105,7 @@ impl LogicalButton {
             LogicalButton::RightStickCapTouch => ButtonFlags::RIGHT_STICK_CAP_TOUCH,
             LogicalButton::LeftStickCapTouch => ButtonFlags::LEFT_STICK_CAP_TOUCH,
             LogicalButton::LeftStickClick => ButtonFlags::LEFT_STICK_CLICK,
+            LogicalButton::RightStickClick => ButtonFlags::RIGHT_STICK_CLICK,
             LogicalButton::RightPadTouch => ButtonFlags::RIGHT_PAD_TOUCH,
             LogicalButton::RightPadClick => ButtonFlags::RIGHT_PAD_CLICK,
             LogicalButton::DpadUp => ButtonFlags::DPAD_UP,
@@ -203,6 +209,13 @@ pub struct Profile {
 impl Profile {
     /// The bindings that reproduce this adapter's original hardcoded
     /// behavior, before remapping existed.
+    ///
+    /// RTHUMB binds to [`RightStickClick`] (the real right-stick click,
+    /// confirmed 2026-07-26) rather than [`RightPadClick`] (the right
+    /// touchpad's press-force click) — the latter was only ever a
+    /// best-effort stand-in used while the real stick click was
+    /// unconfirmed. [`RightPadClick`] is left unmapped by default now,
+    /// same as the rest of the touchpad-specific controls.
     fn default_bindings() -> Vec<ButtonBinding> {
         use LogicalButton::*;
         use XInputButton as X;
@@ -217,7 +230,7 @@ impl Profile {
             ButtonBinding { button: BackSelectView, target: X::Back },
             ButtonBinding { button: Guide, target: X::Guide },
             ButtonBinding { button: LeftStickClick, target: X::LeftThumb },
-            ButtonBinding { button: RightPadClick, target: X::RightThumb },
+            ButtonBinding { button: RightStickClick, target: X::RightThumb },
             ButtonBinding { button: DpadUp, target: X::DpadUp },
             ButtonBinding { button: DpadDown, target: X::DpadDown },
             ButtonBinding { button: DpadLeft, target: X::DpadLeft },
@@ -391,6 +404,19 @@ mod tests {
         let mapped = profile.map(&state);
         assert!(mapped.buttons.contains(XInputButtons::A));
         assert!(!mapped.buttons.contains(XInputButtons::B));
+    }
+
+    /// Regression test: RTHUMB should bind to the real right-stick click
+    /// (confirmed on real hardware 2026-07-26), not the right touchpad's
+    /// press-force click, which was only ever a best-effort stand-in.
+    #[test]
+    fn default_profile_maps_right_stick_click_to_right_thumb() {
+        let profile = Profile::default();
+        let clicked = synthetic_state(ButtonFlags::RIGHT_STICK_CLICK);
+        assert!(profile.map(&clicked).buttons.contains(XInputButtons::RIGHT_THUMB));
+
+        let pad_clicked = synthetic_state(ButtonFlags::RIGHT_PAD_CLICK);
+        assert!(!profile.map(&pad_clicked).buttons.contains(XInputButtons::RIGHT_THUMB));
     }
 
     #[test]

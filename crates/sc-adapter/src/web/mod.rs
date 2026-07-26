@@ -25,11 +25,18 @@ use tokio::sync::watch;
 const INDEX_HTML: &str = include_str!("index.html");
 
 /// Latest decoded state, broadcast from the main HID loop to any connected
-/// browsers. `None` until the first report arrives.
+/// browsers. `None` until the first report of that kind arrives. `raw`/
+/// `mapped` and `signal_dbm` come from separate HID reports (`0x42` and
+/// `0x7b`, arriving at different rates) and are updated independently —
+/// see `main.rs`'s read loop.
 #[derive(Clone, Default)]
 pub struct LiveState {
     pub raw: Option<PadState>,
     pub mapped: Option<XInputState>,
+    /// Wireless RF signal strength in dBm — see
+    /// `sc_protocol::Telemetry::signal_dbm`. Always `None` on a wired
+    /// connection (the telemetry report has only been observed wireless).
+    pub signal_dbm: Option<i8>,
 }
 
 #[derive(Clone)]
@@ -38,6 +45,10 @@ pub struct AppState {
     pub profile: Arc<RwLock<Profile>>,
     pub store: Arc<ProfileStore>,
     pub rumble_tx: mpsc::Sender<(Motor, u8)>,
+    /// The paired controller's serial (read via feature report `0x02` on
+    /// connect — see `SteamControllerDevice::read_controller_serial`).
+    /// `None` until the main loop has connected at least once.
+    pub serial: Arc<RwLock<Option<String>>>,
 }
 
 pub async fn run(bind: SocketAddr, state: AppState) -> anyhow::Result<()> {
@@ -46,6 +57,7 @@ pub async fn run(bind: SocketAddr, state: AppState) -> anyhow::Result<()> {
         .route("/ws", get(ws_handler))
         .route("/api/logical-buttons", get(logical_buttons))
         .route("/api/xinput-buttons", get(xinput_buttons))
+        .route("/api/device-info", get(device_info))
         .route(
             "/api/active-profile",
             get(get_active_profile).put(put_active_profile),
@@ -83,6 +95,7 @@ async fn stream_state(mut socket: WebSocket, mut live: watch::Receiver<LiveState
         let payload = json!({
             "raw": current.raw.as_ref().map(pad_state_json),
             "mapped": current.mapped.as_ref().map(xinput_state_json),
+            "signal_dbm": current.signal_dbm,
         });
         if socket.send(Message::Text(payload.to_string().into())).await.is_err() {
             return; // browser disconnected
@@ -135,8 +148,28 @@ async fn xinput_buttons() -> Json<Value> {
     Json(serde_json::to_value(XInputButton::ALL).unwrap())
 }
 
+async fn device_info(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({ "serial": *state.serial.read().unwrap() }))
+}
+
 fn internal_err(e: anyhow::Error) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+}
+
+/// Runs a [`ProfileStore`] operation on a blocking-pool thread rather than
+/// directly on the async request-handling task — `ProfileStore` does plain
+/// synchronous `std::fs` I/O, which would otherwise stall the executor
+/// thread (and every other in-flight request on it) for the duration of
+/// the syscall.
+async fn run_blocking<T, F>(store: Arc<ProfileStore>, f: F) -> Result<T, (StatusCode, String)>
+where
+    F: FnOnce(&ProfileStore) -> anyhow::Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || f(&store))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("blocking task panicked: {e}")))?
+        .map_err(internal_err)
 }
 
 async fn get_active_profile(State(state): State<AppState>) -> Json<Profile> {
@@ -158,25 +191,27 @@ async fn save_active_profile(
     State(state): State<AppState>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let profile = state.profile.read().unwrap().clone();
-    state.store.save(&profile).map_err(internal_err)?;
-    state
-        .store
-        .set_active_name(&profile.name)
-        .map_err(internal_err)?;
+    run_blocking(state.store.clone(), move |store| {
+        store.save(&profile)?;
+        store.set_active_name(&profile.name)
+    })
+    .await?;
     Ok(StatusCode::OK)
 }
 
 async fn list_profiles(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<String>>, (StatusCode, String)> {
-    state.store.list().map(Json).map_err(internal_err)
+    let names = run_blocking(state.store.clone(), |store| store.list()).await?;
+    Ok(Json(names))
 }
 
 async fn get_profile(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<Profile>, (StatusCode, String)> {
-    state.store.load(&name).map(Json).map_err(internal_err)
+    let profile = run_blocking(state.store.clone(), move |store| store.load(&name)).await?;
+    Ok(Json(profile))
 }
 
 /// Loads a saved profile from disk, makes it the active in-memory profile,
@@ -185,8 +220,12 @@ async fn load_profile(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<Profile>, (StatusCode, String)> {
-    let profile = state.store.load(&name).map_err(internal_err)?;
-    state.store.set_active_name(&name).map_err(internal_err)?;
+    let profile = run_blocking(state.store.clone(), move |store| {
+        let profile = store.load(&name)?;
+        store.set_active_name(&name)?;
+        Ok(profile)
+    })
+    .await?;
     *state.profile.write().unwrap() = profile.clone();
     Ok(Json(profile))
 }
@@ -195,7 +234,7 @@ async fn delete_profile(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    state.store.delete(&name).map_err(internal_err)?;
+    run_blocking(state.store.clone(), move |store| store.delete(&name)).await?;
     Ok(StatusCode::OK)
 }
 

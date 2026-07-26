@@ -42,14 +42,13 @@ all (different report ID, different everything).
 Confirmed:
 
 - Report ID (`0x42`), 1-byte sequence counter.
-- All 20 digital buttons: face buttons (A/B/X/Y), the "dots" quick-access
-  button, both bumpers, start/back/guide, the *left* stick click, the
-  right touchpad click, D-pad, all four back paddles. (There is no
-  confirmed right-*stick* click — see "Not yet implemented" below; only
-  the right touchpad clicks.) Separately, a right-touchpad touch-detection
-  flag also exists (fires on contact, alongside but distinct from the
-  click) — not counted in the 20 since it's more a proximity sensor than
-  a press, same treatment as the two stick cap-touch sensors below.
+- All 21 digital buttons: face buttons (A/B/X/Y), the "dots" quick-access
+  button, both bumpers, start/back/guide, *both* stick clicks, the right
+  touchpad click, D-pad, all four back paddles. Separately, a
+  right-touchpad touch-detection flag also exists (fires on contact,
+  alongside but distinct from the click) — not counted in the 21 since
+  it's more a proximity sensor than a press, same treatment as the two
+  stick cap-touch sensors below.
   - **Correction:** a bit originally captured under a "right bumper" prompt
     turned out to be the right stick's capacitive touch sensor (fires
     while gripping/resting a thumb on the stick — presumably used to
@@ -57,6 +56,22 @@ Confirmed:
     a button at all. The real right bumper was found separately; see
     `ButtonFlags` doc comments in `sc-protocol` for both. Left bumper was
     unaffected — confirmed as a genuine button.
+  - **Real right-*stick* click found (2026-07-26):** a bit previously
+    logged as "never observed to fire" (report byte 2, `0x20`) is the real
+    right-thumbstick click — distinct from the right *touchpad*'s
+    press-force click. Isolated via a dedicated capture (fires alongside
+    the right stick's cap-touch bit, since a thumb has to be on the stick
+    to click it) plus a touchpad-click negative control that never set it.
+    XInput's RTHUMB now binds to this real click instead of the
+    touchpad-click stand-in used previously.
+  - **Right bumper re-verified (2026-07-26):** two fresh ~6.5s
+    continuous-hold captures on the same unit — one held at 100% duty
+    cycle throughout, the other dropped for a single contiguous ~1.0s gap
+    partway through an otherwise-solid hold. The drop is one clean
+    contiguous run in the raw bit (not per-sample flicker), consistent
+    with the tester's finger briefly lifting off the button during that
+    hold rather than a hardware or decoding fault, per the hardware
+    owner. Not treated as an open issue.
 - Both trigger axes (u16, 0..32767).
 - Left stick, right stick, left touchpad, right touchpad — four distinct
   analog surfaces, sign and full-scale range verified in every direction
@@ -90,20 +105,75 @@ Confirmed:
   same haptic motors rather than a dedicated audio component, which is
   also why the earlier hunt for speaker-sized output reports never found
   anything.
+- **Wireless RF signal strength**, in dBm — but from a completely separate
+  HID report (`0x7b`, 13 bytes), not the main `0x42` input stream. Found by
+  reading the device's HID report descriptor directly (e.g.
+  `/sys/class/hidraw/hidrawN/device/report_descriptor` — see
+  `crates/sc-hid/examples/feature_probe.rs`) rather than by pressing
+  controls — the descriptor declares several other report IDs `sc-adapter`
+  never touched before. Report `0x7b` streams continuously and
+  independently at its own ~2Hz rate, interleaved with `0x42`; byte 9 is
+  the only actively-varying byte in it, and only makes physical sense as a
+  **signed** value (two's complement) — the observed range (~190–217
+  unsigned) becomes -66..-39 dBm signed, squarely inside plausible
+  real-world RSSI. See `sc_protocol::Telemetry::signal_dbm`; shown live in
+  the web UI. Unconfirmed: exact calibration/accuracy, and behavior at the
+  edge of range.
+- **The paired controller's serial number**, via HID **feature report**
+  `0x02` (`GET_FEATURE_REPORT`, request/response — distinct from every
+  other report on this page, which are all streamed). Necessary over the
+  wireless puck specifically because the OS-level HID string descriptor
+  for whichever puck interface got opened reports the **puck's own**
+  serial, not the paired controller's (confirmed distinct on the unit this
+  was tested against). See `SteamControllerDevice::read_controller_serial`;
+  shown live in the web UI.
 
 Not yet implemented / unconfirmed (left out rather than guessed):
 
 - Left touchpad click (only the right pad's press-force click was
   isolated; the left may be software/Steam-Input-synthesized rather than
   exposed over raw HID at all).
-- Real right-*stick* click (distinct from the right *touchpad*'s
-  press-force click, which is what's actually mapped to XInput's RTHUMB
-  today as a best-effort stand-in).
-- The real right bumper's contact seemed intermittent during a held press
-  across both confirming captures (present well under 100% of the hold in
-  each) — possibly a hardware quirk of this unit rather than a decoding
-  error, but worth re-verifying.
-- Battery level, connection-type/status bits.
+- **Battery level.** Extensively investigated (2026-07-26) and not found —
+  written up here in detail since the negative results themselves took a
+  real investigation to establish and are easy to accidentally re-derive
+  from scratch otherwise:
+  - Report `0x42` bytes 46–53 (past everything else decoded) sit at a
+    rock-solid constant `ff 7f 00 00 00 00 00 00` — checked across idle,
+    every digital button, both sticks/pads, a full grip squeeze, both
+    triggers fully pulled, ~50 minutes of continuous max-amplitude rumble
+    on all motors (to accelerate drain), and a full wired charge cycle.
+    Never moves. Not a live battery/charge field on any timescale tested.
+  - Report `0x42` bytes 30-31 (a 16-bit LE pair) are a "charging active"
+    clock: frozen solid everywhere *except* while genuinely plugged in and
+    charging, where they tick at a steady ~4ms/step. Useful as a binary
+    charging-detector (and confirmed to reflect the physical battery's
+    real charging state over *either* connection — wired or wireless —
+    not just "is a wired PID open"), but it's a clock, not a percentage.
+  - Report `0x7b` byte 9 is `Telemetry::signal_dbm` (RSSI), not battery —
+    see "Confirmed" above.
+  - Report `0x43` carries a "charging mode" flag (byte 1: `0x01` idle /
+    `0x02` charging) plus, only while charging, several more bytes (offsets
+    7-12) that light up. One of them (byte 8) is a second static flag
+    (exactly `0` idle / `18` charging, confirmed via 334 samples with no
+    other value ever seen); the rest cycle through small, bounded,
+    quantized-looking value sets with no trend — matches the same
+    PWM/ADC-sampling-aliasing character as the bytes-30-31 clock rather
+    than a measurement.
+  - HID **feature report** `0x01` (`GET_FEATURE_REPORT`, 63 bytes,
+    alongside `0x02`'s serial-number payload — see "Confirmed" above)
+    stalls (`EPIPE`/"broken pipe") on every query except exactly once,
+    immediately after plugging in for charging, where it returned
+    `01 8e 00 00...00` — a single non-zero byte among 63. Unreproducible
+    across 21 follow-up attempts (including polling immediately after
+    fresh connections) despite still being plugged in and charging.
+    Real data point, not an actionable one — the timing trigger (if any)
+    wasn't identified.
+  - Conclusion: no clean/monotonic battery-percentage signal found
+    anywhere searched. What *has* been found is multiple independent,
+    mutually-redundant "charging is active" flags (bytes 30-31, `0x43`
+    byte 1, `0x43` byte 8) and one very short-lived, unreproduced feature-
+    report response that might be worth revisiting if it starts firing
+    reliably under some as-yet-unidentified condition.
 - Whether/how gripping a stick suppresses its co-located touchpad (the
   capacitive sensor above is presumably involved, per the hardware
   owner — not independently verified beyond detecting the sensor itself).
@@ -138,7 +208,7 @@ correctly on your hardware, re-derive the layout with the same method:
 ## Layout
 
 - `crates/sc-protocol` — pure decoding logic, no I/O (`report.rs` holds the wire format).
-- `crates/sc-hid` — USB HID device discovery/read loop plus output-report writing (rumble), via `hidapi`.
+- `crates/sc-hid` — USB HID device discovery/read loop plus output-report writing (rumble), via `hidapi`. `examples/` holds scratch protocol-investigation tools (not part of the crate's public surface) — `feature_probe.rs` probes HID feature reports and sweeps candidate device paths; `battery_drain_monitor.rs` drives continuous rumble while watching for report/byte changes over long unattended runs. See both files' module docs, and the "Protocol status" battery write-up above, for what they found.
 - `crates/sc-xinput` — the `VirtualPad` trait, `XInputState`/`XInputButtons` (the fully-mapped, ready-to-send shape), plus the `windows_vigem` and `linux_uinput` backends. Backends are purely mechanical — they don't know about physical buttons at all.
 - `crates/sc-config` — decides which physical control drives which XInput output: deadzone/response-curve shaping (`AxisSettings`), the button remap table (`LogicalButton` → `XInputButton`), and `Profile`/`ProfileStore` for saving/loading named configs as TOML.
 - `crates/sc-adapter` — the binary: CLI, main loop, logging, and (opt-in) the `web` module serving the local monitoring/config UI.
@@ -336,17 +406,21 @@ Opens a local web server (default `http://127.0.0.1:61302`, override with
 
 - **Live monitoring**: every button, both sticks, both touchpads, both
   triggers, grip pressure, and raw IMU values, streamed over a WebSocket.
+  The header also shows the paired controller's serial number and (over
+  the wireless puck) live RF signal strength in dBm — see "Protocol
+  status" above for where both come from.
 - **Deadzone/curve tuning** for the 4 XInput-mappable axes (left/right
   stick, left/right trigger) — radial deadzone with rescale, plus a
   response-curve exponent. Live-previewed against the running adapter
   immediately; hit "Save" to persist.
-- **Button remapping** — bind any of the 23 tracked physical
-  controls/sensors to any XInput button, or leave it unmapped. 8 have no
+- **Button remapping** — bind any of the 24 tracked physical
+  controls/sensors to any XInput button, or leave it unmapped. 9 have no
   binding in the default profile: the four back paddles, the "dots"
-  button, the right touchpad's touch flag, and both sticks' capacitive
-  cap-touch sensors (binding the cap-touch sensors to something would
-  cause spurious presses during normal stick use, so they're left
-  unmapped rather than given a default).
+  button, the right touchpad's touch *and* click flags (RTHUMB now binds
+  to the real right-stick click instead — see "Protocol status" above),
+  and both sticks' capacitive cap-touch sensors (binding the cap-touch
+  sensors to something would cause spurious presses during normal stick
+  use, so they're left unmapped rather than given a default).
 - **Profiles** — save, switch, and delete named configs (TOML files under
   the platform config dir, e.g. `~/.config/steam-controller-x/profiles/`
   on Linux).
@@ -360,7 +434,7 @@ reachable from the network.
 
 - Gyro, battery, and grip-squeeze precision (per-side) aren't
   decoded/implemented yet (see "Protocol status" above).
-- Left touchpad click and the real right-stick click aren't confirmed.
+- Left touchpad click isn't confirmed.
 - Grip pressure, IMU data, and touchpad *positions* (the X/Y coordinates)
   have no standard Xbox 360 equivalent and no remapping path at all — they
   aren't part of the button table and are never forwarded, regardless of
@@ -380,6 +454,3 @@ reachable from the network.
   notification/polling API) and would need genuine force-feedback
   (`EV_FF`) support added on the uinput side, which the `uinput` crate
   currently in use doesn't expose.
-- The web UI's profile store does blocking file I/O directly in async
-  request handlers — fine at this scale (small TOML files, single local
-  user), not written for high concurrency.

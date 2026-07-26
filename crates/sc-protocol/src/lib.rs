@@ -6,7 +6,7 @@
 
 pub mod report;
 
-pub use report::decode;
+pub use report::{decode, decode_telemetry};
 
 use bitflags::bitflags;
 
@@ -18,20 +18,12 @@ bitflags! {
     /// (USB VID `0x28de` PID `0x1302`) while pressing one control at a
     /// time — see [`report`] module docs for the byte layout.
     ///
-    /// Correction (same day, later session): byte 4 bit 0x10 was initially
-    /// captured under a "right bumper" prompt and labeled accordingly, but
-    /// the hardware's owner identified it afterward as actually the
-    /// capacitive touch sensor on top of the right stick (used by the
-    /// firmware to suppress accidental right-touchpad input while gripping
-    /// the stick) — see [`Self::RIGHT_STICK_CAP_TOUCH`]. The real right
-    /// bumper was then found at byte 3 bit 0x02, confirmed across two
-    /// captures landing on the identical value, though contact seemed
-    /// intermittent (present for well under 100% of a held press in both) —
-    /// possibly a hardware quirk of this unit's shoulder button, not
-    /// necessarily a decoding error.
-    ///
-    /// Bit 0x20 of report byte 2 and bit 0x80 of byte 4 were never observed
-    /// to fire and are left unmapped (reserved/unknown).
+    /// Byte 2 bit 0x20 was originally logged as "never observed to fire";
+    /// a follow-up session (2026-07-26) isolated it as the real right
+    /// *stick* click (pressing straight down on the stick, distinct from
+    /// the right *touchpad*'s press-force click) — see
+    /// [`Self::RIGHT_STICK_CLICK`]. Bit 0x80 of byte 4 is still unmapped
+    /// (reserved/unknown).
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct ButtonFlags: u32 {
         // Report byte 2
@@ -41,14 +33,19 @@ bitflags! {
         const Y                   = 1 << 3;
         /// The "..." quick-access button.
         const DOTS                = 1 << 4;
+        /// The real right *stick* click (straight-down press on the
+        /// stick), distinct from [`Self::RIGHT_PAD_CLICK`] (the right
+        /// *touchpad*'s press-force click). Confirmed 2026-07-26: fires
+        /// alongside [`Self::RIGHT_STICK_CAP_TOUCH`] (your thumb has to be
+        /// on the stick to click it), and never alongside
+        /// [`Self::RIGHT_PAD_CLICK`]/[`Self::RIGHT_PAD_TOUCH`] — isolated
+        /// via a dedicated stick-click capture plus a touchpad-click
+        /// negative control.
+        const RIGHT_STICK_CLICK   = 1 << 5;
         const START               = 1 << 6;
         const RIGHT_PADDLE_UPPER  = 1 << 7;
         // Report byte 3
         const RIGHT_PADDLE_LOWER  = 1 << 8;
-        /// The real right bumper/shoulder button — see the correction note
-        /// above. Contact seemed intermittent during a held press in both
-        /// confirming captures; may need re-verification on this or other
-        /// units.
         const RIGHT_BUMPER        = 1 << 9;
         const DPAD_DOWN           = 1 << 10;
         const DPAD_RIGHT          = 1 << 11;
@@ -121,7 +118,7 @@ pub struct PadState {
     /// detecting drops.
     pub sequence: u8,
     pub buttons: ButtonFlags,
-    /// 0 (released) to 32767 (fully pulled).
+    /// 0 (released) to 32767 (fully pulled). 15-bit ADC?
     pub left_trigger: u16,
     /// 0 (released) to 32767 (fully pulled).
     pub right_trigger: u16,
@@ -139,6 +136,31 @@ pub struct PadState {
     /// it by about the same amount in testing.
     pub grip: u8,
     pub imu: ImuSample,
+}
+
+/// Decoded contents of the separate telemetry report (`0x7b`) — see
+/// [`report::decode_telemetry`] and [`report::TELEMETRY_REPORT_ID`].
+///
+/// This is a genuinely different HID report from the main `0x42` input
+/// stream: it was found by reading the device's HID report descriptor
+/// directly rather than by pressing controls (see `feature_probe.rs`'s
+/// module docs, and the "Protocol status" section of the README), streams
+/// continuously and independently at its own (~2Hz) rate, and is *not*
+/// part of [`PadState`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Telemetry {
+    /// Wireless RF signal strength, in dBm (more negative = weaker).
+    ///
+    /// Confirmed 2026-07-26 by empirical range only, not against a
+    /// reference signal meter: report `0x7b` byte 9 is the most
+    /// actively-varying byte in that report (jittered ~190-217 unsigned
+    /// across observation), which only makes sense as a *signed* byte
+    /// (two's complement) — that range is -66..-39, squarely inside
+    /// plausible real-world RSSI. No other byte in the report produced a
+    /// physically plausible range under either interpretation. Unconfirmed:
+    /// exact accuracy/calibration, and behavior at the edge of range (very
+    /// weak signal, e.g. controller far from the receiver).
+    pub signal_dbm: i8,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

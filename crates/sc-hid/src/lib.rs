@@ -165,6 +165,70 @@ impl SteamControllerDevice {
         Ok(self.device.write(report)?)
     }
 
+    /// Request a HID *feature* report (`GET_FEATURE_REPORT`) by id — the
+    /// explicit request/response side of HID, distinct from the streaming
+    /// input reports `read_report` polls. `buf[0]` must be set to
+    /// `report_id` before calling; on success `buf[0]` still holds the
+    /// report id and the payload starts at `buf[1]`, with the return value
+    /// counting the id byte. This device declares feature reports `0x01`
+    /// and `0x02` (63 bytes each) in its HID report descriptor that
+    /// `sc-adapter`'s normal input-report polling never touches — see
+    /// `crates/sc-hid/examples/feature_probe.rs` for where this was used to
+    /// discover them by reading the descriptor directly and probing each.
+    pub fn get_feature_report(&self, report_id: u8, buf: &mut [u8]) -> Result<usize, HidError> {
+        buf[0] = report_id;
+        Ok(self.device.get_feature_report(buf)?)
+    }
+
+    /// Read the *paired controller's* serial number, preferring feature
+    /// report `0x02` (e.g. `"FXA9961200714"`) over the OS-level HID string
+    /// descriptor (`HidDevice::get_serial_number_string`).
+    ///
+    /// The two agree on a wired connection (there's only one physical
+    /// device). Over the wireless puck they can diverge: the puck exposes
+    /// several hidraw paths (one per pairing channel, plus a control
+    /// interface — see [`Self::open`]'s docs), and feature report `0x02`'s
+    /// content on any *given* path depends on live pairing state — same
+    /// serial-string *shape* either way, but sometimes it's the paired
+    /// **controller's** identity and sometimes just the **puck's own**
+    /// (confirmed by sweeping every candidate path directly: some
+    /// consistently echoed the puck's own OS-reported serial, one returned
+    /// a non-ASCII blob with no serial in it at all). Since a puck's own
+    /// serial is already cheaply available without a feature-report round
+    /// trip, this only trusts the feature-report result when it's
+    /// something *other* than that — otherwise it falls back to the
+    /// OS-level string, which is at least always correct on wired and
+    /// still identifies the puck itself on wireless.
+    pub fn read_controller_serial(&self) -> Result<Option<String>, HidError> {
+        let own_serial = self.device.get_serial_number_string()?;
+
+        let mut buf = [0u8; 64];
+        if let Ok(n) = self.get_feature_report(0x02, &mut buf) {
+            if let Some(decoded) = Self::extract_ascii_run(&buf[1..n]) {
+                if Some(&decoded) != own_serial.as_ref() {
+                    return Ok(Some(decoded));
+                }
+            }
+        }
+        Ok(own_serial)
+    }
+
+    /// The first contiguous run of 4+ printable ASCII bytes in `payload`,
+    /// if any. Confirmed 2026-07-25(6) against feature report `0x02`: the
+    /// serial starts at payload offset 10 (`buf[11]` including the id
+    /// byte), null-padded after — scanned for rather than hardcoded at
+    /// that exact offset, in case of drift across firmware/units, per this
+    /// project's general preference for re-deriving over guessing (see
+    /// `sc_protocol::report`'s module docs).
+    fn extract_ascii_run(payload: &[u8]) -> Option<String> {
+        let start = payload.iter().position(|&b| b.is_ascii_graphic())?;
+        let len = payload[start..].iter().take_while(|&&b| b.is_ascii_graphic()).count();
+        if len < 4 {
+            return None; // too short to plausibly be a serial, not noise
+        }
+        Some(String::from_utf8_lossy(&payload[start..start + len]).into_owned())
+    }
+
     /// Trigger a haptic pulse on one motor.
     ///
     /// The controller has (per the owner's own research) 4 haptic motors.

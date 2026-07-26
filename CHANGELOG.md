@@ -14,7 +14,7 @@ in-progress implementation.
 
 - `sc-protocol`: pure decoding logic for the new (2026) Steam Controller's
   raw USB HID input reports (report ID `0x42`), reverse-engineered against
-  real hardware — all 20 digital buttons, both trigger axes, two sticks,
+  real hardware — all 21 digital buttons, both trigger axes, two sticks,
   two touchpads, 6-axis IMU, capacitive grip/stick-touch sensing.
 - `sc-hid`: USB HID device discovery and I/O via `hidapi`, including
   wireless-puck interface probing and haptic rumble output reports for the
@@ -57,4 +57,53 @@ in-progress implementation.
   Controller and can pop its on-screen keyboard on a face-button press;
   no fix found yet.
 
-[Unreleased]: https://github.com/s3govesus/steam-controller-x/commits/main
+## [0.1.2] - 2026-07-26
+
+### Added
+
+- `sc-protocol`: the real right-*stick* click (report byte 2, bit `0x20`),
+  distinct from the right *touchpad*'s press-force click — reverse-engineered
+  against real hardware via a dedicated capture plus a touchpad-click
+  negative control. `sc-config`'s default profile now binds XInput's RTHUMB
+  to this real click instead of the touchpad-click stand-in used previously.
+- `sc-protocol`/`sc-adapter`: wireless RF signal strength, in dBm
+  (`Telemetry::signal_dbm`), decoded from a separate HID report (`0x7b`)
+  found by reading the device's HID report descriptor directly rather than
+  by pressing controls. Shown live in the web UI header, color-coded.
+- `sc-hid`/`sc-adapter`: the paired controller's serial number, read via
+  HID feature report `0x02` (`GET_FEATURE_REPORT`) rather than the OS-level
+  HID string descriptor, which over the wireless puck reports the puck's
+  own serial instead of the controller's. Shown live in the web UI header.
+
+### Fixed
+
+- `sc-adapter`'s web UI: `ProfileStore`'s synchronous file I/O
+  (save/load/list/delete/set-active) now runs via `tokio::task::spawn_blocking`
+  instead of directly on the async request-handling task, so a slow/blocked
+  disk no longer stalls every other in-flight web UI request.
+- `sc-adapter`'s main read loop only ever recognized report id `0x42`,
+  silently discarding every other report type as if it were a read
+  timeout — this is what was hiding the `0x7b` telemetry report above.
+  Now dispatches by report id.
+
+### Investigated
+
+- Re-verified the right bumper's previously-noted intermittent contact with
+  two fresh continuous-hold captures: confirmed it's a single clean
+  contiguous dropout (not per-sample flicker), consistent with the
+  tester's finger briefly lifting off the button rather than a hardware or
+  decoding fault, per the hardware owner. Closed out — not an open issue.
+- Extensively investigated battery-level reporting and did not find it —
+  see the "Battery level" entry under README's "Protocol status" for the
+  full write-up. Summary: report `0x42` bytes 46-53 never move under any
+  tested condition (idle, every control, ~50 minutes of continuous
+  max-rumble drain, a full wired charge cycle); bytes 30-31 are a
+  "charging active" clock, not a percentage; the newly-found `0x7b` and
+  `0x43` reports (see "Added" above) carry more charging-state flags and
+  noisy telemetry but nothing that trends like a battery percentage; a
+  feature-report `0x01` response (`01 8e 00...00`) fired exactly once and
+  never reproduced across 21 follow-up attempts. Closed out as
+  unresolved — documented rather than guessed at.
+
+[Unreleased]: https://github.com/s3govesus/steam-controller-x/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/s3govesus/steam-controller-x/releases/tag/v0.1.2

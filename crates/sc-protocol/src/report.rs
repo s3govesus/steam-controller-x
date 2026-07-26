@@ -55,14 +55,21 @@
 //! idle (add `--tilt`-style static-hold tests, not just press/release, for
 //! anything that might be a rate sensor rather than a position sensor).
 
-use crate::{ButtonFlags, DecodeError, ImuSample, PadState, StickAxis};
+use crate::{ButtonFlags, DecodeError, ImuSample, PadState, StickAxis, Telemetry};
 
-/// The only input report type this decoder understands.
+/// The main gamepad input report type — everything in [`PadState`].
 pub const INPUT_REPORT_ID: u8 = 0x42;
 
 /// Minimum report length we're willing to parse. Anything shorter is
 /// rejected rather than guessed at.
 pub const MIN_REPORT_LEN: usize = 46;
+
+/// The separate telemetry report type — see [`Telemetry`]/[`decode_telemetry`].
+pub const TELEMETRY_REPORT_ID: u8 = 0x7b;
+
+/// Minimum length for [`decode_telemetry`]. The full report is 13 bytes
+/// (including the id byte); this only needs through byte 9.
+pub const TELEMETRY_MIN_LEN: usize = 10;
 
 // Byte offsets within the report (including the leading report-ID byte).
 mod offset {
@@ -195,6 +202,23 @@ pub fn decode(report: &[u8]) -> Result<PadState, DecodeError> {
     })
 }
 
+/// Decode the separate telemetry report (`0x7b`) — see [`Telemetry`].
+///
+/// `report` should be the full report as read from the device, including
+/// the leading report-ID byte.
+pub fn decode_telemetry(report: &[u8]) -> Result<Telemetry, DecodeError> {
+    if report.is_empty() {
+        return Err(DecodeError::TooShort);
+    }
+    if report[0] != TELEMETRY_REPORT_ID {
+        return Err(DecodeError::UnexpectedReportId(report[0]));
+    }
+    if report.len() < TELEMETRY_MIN_LEN {
+        return Err(DecodeError::TooShort);
+    }
+    Ok(Telemetry { signal_dbm: report[9] as i8 })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +270,7 @@ mod tests {
         assert!(state.buttons.contains(ButtonFlags::LEFT_BUMPER));
         assert!(state.buttons.contains(ButtonFlags::RIGHT_BUMPER));
         assert!(state.buttons.contains(ButtonFlags::RIGHT_STICK_CAP_TOUCH));
+        assert!(!state.buttons.contains(ButtonFlags::RIGHT_STICK_CLICK));
         assert!(!state.buttons.contains(ButtonFlags::B));
         assert_eq!(state.left_trigger, 30000);
         assert_eq!(state.right_trigger, 15000);
@@ -295,6 +320,20 @@ mod tests {
         assert!(decode(&r).unwrap().buttons.contains(ButtonFlags::LEFT_STICK_CAP_TOUCH));
     }
 
+    /// Regression test for a real-hardware finding (2026-07-26): byte 2 bit
+    /// 0x20, previously never observed to fire, is the real right-*stick*
+    /// click — distinct from [`ButtonFlags::RIGHT_PAD_CLICK`] (the right
+    /// *touchpad*'s press-force click). Isolated via a dedicated capture
+    /// plus a touchpad-click negative control that never set this bit.
+    #[test]
+    fn right_stick_click_distinct_from_right_pad_click() {
+        let mut r = synthetic_report();
+        r[offset::BUTTONS_0] |= 0x20;
+        let state = decode(&r).unwrap();
+        assert!(state.buttons.contains(ButtonFlags::RIGHT_STICK_CLICK));
+        assert!(!state.buttons.contains(ButtonFlags::RIGHT_PAD_CLICK));
+    }
+
     #[test]
     fn rejects_wrong_report_id() {
         let mut r = synthetic_report();
@@ -308,5 +347,36 @@ mod tests {
     #[test]
     fn rejects_too_short() {
         assert!(matches!(decode(&[0x42, 0x00]), Err(DecodeError::TooShort)));
+    }
+
+    /// Regression test for a real-hardware finding (2026-07-26): report
+    /// 0x7b's byte 9, interpreted as a signed byte, tracks a physically
+    /// plausible RSSI range (observed ~-66..-39 dBm) — see
+    /// [`crate::Telemetry::signal_dbm`].
+    #[test]
+    fn decodes_telemetry_signal_strength() {
+        let mut r = [0u8; TELEMETRY_MIN_LEN];
+        r[0] = TELEMETRY_REPORT_ID;
+        r[9] = 0xce; // 206 unsigned -> -50 signed
+        let telemetry = decode_telemetry(&r).unwrap();
+        assert_eq!(telemetry.signal_dbm, -50);
+    }
+
+    #[test]
+    fn telemetry_rejects_wrong_report_id() {
+        let mut r = [0u8; TELEMETRY_MIN_LEN];
+        r[0] = 0x42;
+        assert!(matches!(
+            decode_telemetry(&r),
+            Err(DecodeError::UnexpectedReportId(0x42))
+        ));
+    }
+
+    #[test]
+    fn telemetry_rejects_too_short() {
+        assert!(matches!(
+            decode_telemetry(&[TELEMETRY_REPORT_ID, 0x00]),
+            Err(DecodeError::TooShort)
+        ));
     }
 }

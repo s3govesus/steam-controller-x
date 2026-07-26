@@ -15,6 +15,8 @@
       --accent: #5b8cff;
       --on: #4ade80;
       --off: #333844;
+      --warn: #facc15;
+      --bad: #f87171;
     }
 
     * {
@@ -49,6 +51,30 @@
 
     #status.connected {
       color: var(--on);
+    }
+
+    #serial {
+      font-size: 12px;
+      color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+
+    #signal {
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      color: var(--dim);
+    }
+
+    #signal.good {
+      color: var(--on);
+    }
+
+    #signal.ok {
+      color: var(--warn);
+    }
+
+    #signal.bad {
+      color: var(--bad);
     }
 
     main {
@@ -267,6 +293,8 @@
   <header>
     <h1>steam-controller-x</h1>
     <span id="status">connecting…</span>
+    <span id="serial"></span>
+    <span id="signal"></span>
   </header>
   <main>
     <section class="panel" id="monitor">
@@ -376,9 +404,21 @@
       return [x, y];
     }
 
+    function renderSignal(dbm) {
+      const el = document.getElementById("signal");
+      el.classList.remove("good", "ok", "bad");
+      if (dbm === null || dbm === undefined) {
+        el.textContent = "";
+        return;
+      }
+      el.textContent = `${dbm} dBm`;
+      el.classList.add(dbm >= -60 ? "good" : dbm >= -75 ? "ok" : "bad");
+    }
+
     function renderLive(msg) {
       const raw = msg.raw;
       const mapped = msg.mapped;
+      renderSignal(msg.signal_dbm);
       if (!raw) return;
 
       for (const key of ["left_stick", "right_stick", "left_pad", "right_pad"]) {
@@ -404,11 +444,20 @@
       void mapped; // mapped state currently only informs the config panel indirectly
     }
 
+    async function refreshDeviceInfo() {
+      const { serial } = await api("/api/device-info");
+      document.getElementById("serial").textContent = serial ? `S/N ${serial}` : "";
+    }
+
     function connectWs() {
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${proto}//${location.host}/ws`);
       const status = document.getElementById("status");
-      ws.onopen = () => { status.textContent = "connected"; status.classList.add("connected"); };
+      ws.onopen = () => {
+        status.textContent = "connected";
+        status.classList.add("connected");
+        refreshDeviceInfo().catch((e) => console.error(e));
+      };
       ws.onclose = () => {
         status.textContent = "disconnected — retrying…";
         status.classList.remove("connected");
@@ -537,6 +586,7 @@
       xinputButtons = await api("/api/xinput-buttons");
       buildButtonsGrid();
       await loadActiveProfile();
+      await refreshDeviceInfo();
       connectWs();
 
       document.getElementById("btn-save").addEventListener("click", () => {

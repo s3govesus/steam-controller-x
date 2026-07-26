@@ -8,3 +8,6 @@ license.workspace = true
 hidapi.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

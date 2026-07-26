@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use sc_config::ProfileStore;
@@ -43,8 +44,9 @@ struct Cli {
     #[arg(long)]
     replay: Option<PathBuf>,
 
-    /// Trigger a single haptic pulse on the given motor slot (a/b/c/d) and
-    /// exit, instead of running the adapter loop. Exercises the
+    /// Buzz the given motor slot (a/b/c/d) for about a second and exit,
+    /// instead of running the adapter loop -- a single output report is
+    /// often too brief to feel, so this repeats it for ~1s. Exercises the
     /// best-effort rumble encoding — see `sc_hid::Motor` for confidence
     /// levels on each slot.
     #[arg(long, value_name = "a|b|c|d")]
@@ -150,8 +152,16 @@ fn main() -> anyhow::Result<()> {
         // One-shot diagnostic command: fail fast rather than retry, since an
         // instant "not found" is more useful here than waiting around.
         let device = SteamControllerDevice::open(&api, filter)?;
-        device.send_rumble_pulse(motor, 0xff)?;
-        println!("sent rumble pulse to motor {motor:?}");
+        // A single output report is a brief, often-imperceptible tick --
+        // repeat it for about a second so the motor produces an actually
+        // noticeable, sustained buzz (same technique used to drive
+        // continuous rumble in `crates/sc-hid/examples/battery_drain_monitor.rs`).
+        let test_start = Instant::now();
+        while test_start.elapsed() < Duration::from_secs(1) {
+            device.send_rumble_pulse(motor, 0xff)?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        println!("sent rumble pulses to motor {motor:?} for ~1s");
         return Ok(());
     }
 
@@ -184,6 +194,7 @@ fn main() -> anyhow::Result<()> {
     let profile = Arc::new(RwLock::new(store.load_active_or_default()));
     let (rumble_tx, rumble_rx) = mpsc::channel::<(sc_hid::Motor, u8)>();
     let (live_tx, live_rx) = tokio::sync::watch::channel(web::LiveState::default());
+    let serial = Arc::new(RwLock::new(None::<String>));
 
     if cli.web {
         let bind: SocketAddr = format!("{}:{}", cli.web_bind, cli.web_port)
@@ -194,6 +205,7 @@ fn main() -> anyhow::Result<()> {
             profile: profile.clone(),
             store: store.clone(),
             rumble_tx: rumble_tx.clone(),
+            serial: serial.clone(),
         };
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Runtime::new() {
@@ -211,11 +223,34 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut pad = make_pad()?;
+    // Carried across reads (and reconnects) so that an update to one
+    // report type doesn't blank out the others in the broadcast state —
+    // 0x42 (gamepad) and 0x7b (telemetry, incl. signal strength — see
+    // `sc_protocol::Telemetry`) are separate reports arriving at different
+    // rates, interleaved on the same read loop.
+    let mut last_raw: Option<sc_protocol::PadState> = None;
+    let mut last_mapped: Option<sc_xinput::XInputState> = None;
+    let mut last_signal_dbm: Option<i8> = None;
     while running.load(Ordering::SeqCst) {
         let Some(device) = open_with_retry(&mut api, filter, &running) else {
             break;
         };
         tracing::info!("controller connected");
+
+        // Queried fresh on every (re)connect, not just once, since a
+        // replug could be a different physical unit. Read via feature
+        // report 0x02 rather than the OS-level HID string descriptor,
+        // which over the wireless puck would report the puck's own serial
+        // rather than the paired controller's — see
+        // `SteamControllerDevice::read_controller_serial`.
+        match device.read_controller_serial() {
+            Ok(Some(s)) => {
+                tracing::info!(serial = %s, "read controller serial");
+                *serial.write().unwrap() = Some(s);
+            }
+            Ok(None) => tracing::warn!("controller serial feature report had no recognizable serial"),
+            Err(err) => tracing::warn!(%err, "failed to read controller serial"),
+        }
 
         // Re-grab on every (re)connect, not just once at startup: a
         // replug can hand out different `/dev/input/eventN` numbers, same
@@ -242,18 +277,37 @@ fn main() -> anyhow::Result<()> {
 
             match device.read_report(&mut buf, 200) {
                 Ok(0) => continue,
-                Ok(n) => match sc_protocol::decode(&buf[..n]) {
-                    Ok(state) => {
-                        let mapped = { profile.read().unwrap().map(&state) };
-                        if let Err(err) = pad.update(&mapped) {
-                            tracing::warn!(%err, "failed to update virtual pad");
+                Ok(n) => match buf[0] {
+                    sc_protocol::report::INPUT_REPORT_ID => match sc_protocol::decode(&buf[..n]) {
+                        Ok(state) => {
+                            let mapped = { profile.read().unwrap().map(&state) };
+                            if let Err(err) = pad.update(&mapped) {
+                                tracing::warn!(%err, "failed to update virtual pad");
+                            }
+                            last_raw = Some(state);
+                            last_mapped = Some(mapped);
+                            let _ = live_tx.send(web::LiveState {
+                                raw: last_raw.clone(),
+                                mapped: last_mapped,
+                                signal_dbm: last_signal_dbm,
+                            });
                         }
-                        let _ = live_tx.send(web::LiveState {
-                            raw: Some(state),
-                            mapped: Some(mapped),
-                        });
+                        Err(err) => tracing::debug!(%err, "failed to decode report"),
+                    },
+                    sc_protocol::report::TELEMETRY_REPORT_ID => {
+                        match sc_protocol::decode_telemetry(&buf[..n]) {
+                            Ok(telemetry) => {
+                                last_signal_dbm = Some(telemetry.signal_dbm);
+                                let _ = live_tx.send(web::LiveState {
+                                    raw: last_raw.clone(),
+                                    mapped: last_mapped,
+                                    signal_dbm: last_signal_dbm,
+                                });
+                            }
+                            Err(err) => tracing::debug!(%err, "failed to decode telemetry report"),
+                        }
                     }
-                    Err(err) => tracing::debug!(%err, "failed to decode report"),
+                    _ => {} // some other/unmapped report id
                 },
                 Err(err) => {
                     tracing::warn!(%err, "lost connection to controller, reconnecting");
