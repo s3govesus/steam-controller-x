@@ -358,11 +358,6 @@ reachable from the network.
 
 ## Known limitations
 
-- The Steam client itself (not just SDL-based games) misidentifies this
-  controller as the 2015 Steam Controller and can pop its on-screen
-  keyboard on a face-button press — unresolved, no fix found yet; see
-  "Steam client itself shows a phantom 'Steam Controller' and pops its
-  keyboard" above.
 - Gyro, battery, and grip-squeeze precision (per-side) aren't
   decoded/implemented yet (see "Protocol status" above).
 - Left touchpad click and the real right-stick click aren't confirmed.
