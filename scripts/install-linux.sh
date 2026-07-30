@@ -66,6 +66,32 @@ echo "== Building (cargo build --release --workspace) =="
 (cd "$REPO_ROOT" && cargo build --release --workspace)
 
 echo
+echo "== uinput kernel module =="
+if [[ -e /sys/module/uinput ]]; then
+    echo "uinput module is already loaded."
+else
+    echo "The uinput module isn't loaded, so /dev/uinput won't exist yet --"
+    echo "sc-adapter needs it to create the virtual Xbox 360 pad."
+    if confirm "Load it now (sudo modprobe uinput)?"; then
+        sudo modprobe uinput
+    else
+        echo "Skipping -- sc-adapter will fail with \"Device not found\" until"
+        echo "the module is loaded."
+    fi
+fi
+
+if [[ -f /etc/modules-load.d/uinput.conf ]]; then
+    echo "Already set to load on boot: /etc/modules-load.d/uinput.conf"
+else
+    if confirm "Load uinput automatically on every boot too?"; then
+        echo "uinput" | sudo tee /etc/modules-load.d/uinput.conf >/dev/null
+        echo "Installed."
+    else
+        echo "Skipping -- you'll need 'sudo modprobe uinput' again after a reboot."
+    fi
+fi
+
+echo
 echo "== /dev/uinput udev rule =="
 if [[ -f "$UDEV_RULE_DST" ]]; then
     echo "Already installed: $UDEV_RULE_DST"

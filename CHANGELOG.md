@@ -5,10 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-Nothing has been tagged/released yet — everything below is the initial,
-in-progress implementation.
+## [0.1.3] - 2026-07-29
 
 ### Added
 
@@ -33,13 +30,27 @@ in-progress implementation.
 - Optional local web UI (`--web`/`--web-bind`/`--web-port`): live
   button/stick/touchpad/IMU monitoring over WebSocket, deadzone/curve
   tuning, button remapping, profile management, and rumble-test buttons.
+  Buttons are grouped by physical location (face/D-pad/shoulders &
+  paddles/sticks & pads/system) rather than dumped in one flat grid; stick
+  diagrams overlay a live deadzone ring; the touchpad diagrams reflect
+  touch/press state (the left pad's press is inferred from the D-pad
+  buttons, since it doubles as the D-pad and has no dedicated click flag);
+  unsaved profile edits are tracked with a dirty indicator and a
+  confirm-before-discard prompt on Load; and errors/save confirmations
+  surface as toasts instead of `alert()` popups.
 - `scripts/install-linux.sh` and `scripts/install-windows.ps1`: idempotent
-  setup scripts (build deps, `uinput` udev rule + group membership on
-  Linux; ViGEmBus install on Windows).
+  setup scripts (build deps, loading the `uinput` kernel module and
+  persisting that across reboots, the `uinput` udev rule + group
+  membership on Linux; ViGEmBus install on Windows).
 - `scripts/run.sh` / `scripts/run.ps1`: auto-detect the controller's USB
   PID and launch `sc-adapter` without needing to pass `--pid` by hand.
 - `tools/pygame_test.py`: standalone SDL2-based script for exercising the
   virtual pad independent of this project's own code.
+- `sc-hid`: two scratch diagnostic examples for the grip-squeeze
+  investigation below — `grip_probe.rs` (watches one byte over time,
+  distinguishing a real sensor reading from a free-running counter) and
+  `isolate_grip_byte.rs` (diffs every byte's value range across an
+  idle/squeeze/release cycle to isolate a real touch-correlated signal).
 
 ### Changed
 
@@ -47,8 +58,35 @@ in-progress implementation.
   range) to avoid clashing with other local dev servers/proxies that
   commonly default to `8080`/"http-alt".
 
+### Fixed
+
+- `sc-protocol`: report byte 32 was mislabeled `grip` (analog grip-squeeze
+  pressure, "49 unsqueezed to 130+ squeezed") based on a single before/after
+  squeeze test. A dedicated probe found it actually free-runs on its own at
+  a steady ~14Hz regardless of touch, sweeping its full `0..=255` range and
+  wrapping every ~18s — this is also what was making the web UI's "Grip"
+  meter climb to 100%, plateau for several seconds, and reset in a loop
+  even with nobody touching the controller. Renamed to
+  `PadState::unknown_counter_32` and pulled the misleading meter from the
+  web UI entirely; see "Investigated" below for the full write-up.
+
+### Investigated
+
+- Grip-squeeze pressure (analog): re-investigated (2026-07-29) after the
+  fix above. A proper isolation test (idle baseline / sustained squeeze /
+  release, diffed per-byte) found no byte in report `0x42` that shifts to a
+  new stable range during a squeeze and returns to baseline after release —
+  so no analog pressure signal was found in this report at all. Only the
+  already-confirmed *digital* squeezed/not-squeezed bit remains reliable.
+  See the "Protocol status" section of the README for the full write-up.
+
 ### Documentation
 
+- Noted in the README that an unloaded `uinput` kernel module makes
+  `sc-adapter` fail immediately with "Error: Device not found." — from the
+  virtual-pad creation step, before it ever tries the physical controller,
+  so it reads like a controller-detection failure (and can make
+  `scripts/run.sh` look like the culprit) but isn't one.
 - Added a disclaimer to the README: this project speaks raw,
   reverse-engineered HID reports (including motor-driving output reports)
   and is provided with no warranty — used at your own risk.

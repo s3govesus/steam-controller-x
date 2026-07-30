@@ -3,20 +3,30 @@
 
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>steam-controller-x</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #16181d;
-      --panel: #1e2129;
-      --border: #2c313c;
-      --text: #e6e8ec;
-      --dim: #8b93a3;
+      --bg: #14161b;
+      --panel: #1c1f27;
+      --panel-2: #21242e;
+      --border: #2a2e38;
+      --border-soft: #23262e;
+      --text: #eaecef;
+      --dim: #939bab;
+      --faint: #666e7d;
       --accent: #5b8cff;
+      --accent-soft: rgba(91, 140, 255, 0.14);
       --on: #4ade80;
-      --off: #333844;
+      --on-soft: rgba(74, 222, 128, 0.14);
+      --off: #2a2e38;
       --warn: #facc15;
       --bad: #f87171;
+      --bad-soft: rgba(248, 113, 113, 0.14);
+      --radius: 10px;
+      --radius-sm: 7px;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     }
 
     * {
@@ -25,65 +35,111 @@
 
     body {
       margin: 0;
-      background: var(--bg);
+      background:
+        radial-gradient(1200px 500px at 15% -10%, rgba(91, 140, 255, 0.06), transparent),
+        var(--bg);
       color: var(--text);
-      font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+
+    a { color: var(--accent); }
 
     header {
       padding: 12px 20px;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
+      position: sticky;
+      top: 0;
+      background: rgba(20, 22, 27, 0.92);
+      backdrop-filter: blur(6px);
+      z-index: 10;
     }
 
     header h1 {
-      font-size: 16px;
+      font-size: 15px;
       margin: 0;
-      font-weight: 600;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
-    #status {
+    header h1::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .spacer { flex: 1; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       font-size: 12px;
       color: var(--dim);
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
     }
 
-    #status.connected {
-      color: var(--on);
+    .pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--faint);
     }
+
+    #status.connected .dot { background: var(--on); box-shadow: 0 0 0 3px var(--on-soft); }
+    #status:not(.connected) .dot { background: var(--bad); }
 
     #serial {
-      font-size: 12px;
-      color: var(--dim);
       font-variant-numeric: tabular-nums;
+      font-family: var(--mono);
+      font-size: 11px;
     }
 
-    #signal {
-      font-size: 12px;
-      font-variant-numeric: tabular-nums;
-      color: var(--dim);
+    .signal-bars {
+      display: inline-flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 10px;
     }
 
-    #signal.good {
-      color: var(--on);
+    .signal-bars i {
+      display: block;
+      width: 3px;
+      background: var(--off);
+      border-radius: 1px;
     }
 
-    #signal.ok {
-      color: var(--warn);
-    }
+    .signal-bars i:nth-child(1) { height: 40%; }
+    .signal-bars i:nth-child(2) { height: 60%; }
+    .signal-bars i:nth-child(3) { height: 80%; }
+    .signal-bars i:nth-child(4) { height: 100%; }
 
-    #signal.bad {
-      color: var(--bad);
-    }
+    #signal.good .signal-bars i { background: var(--on); }
+    #signal.ok .signal-bars i:nth-child(-n+3) { background: var(--warn); }
+    #signal.bad .signal-bars i:nth-child(-n+1) { background: var(--bad); }
+    #signal.good { color: var(--on); }
+    #signal.ok { color: var(--warn); }
+    #signal.bad { color: var(--bad); }
 
     main {
       display: grid;
       grid-template-columns: 1fr 380px;
       gap: 16px;
       padding: 16px;
-      max-width: 1200px;
+      max-width: 1240px;
       margin: 0 auto;
+      align-items: start;
     }
 
     @media (max-width: 900px) {
@@ -95,16 +151,35 @@
     .panel {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: var(--radius);
       padding: 16px;
     }
 
+    .panel + .panel {
+      margin-top: 16px;
+    }
+
     .panel h2 {
-      font-size: 13px;
+      font-size: 12px;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.06em;
       color: var(--dim);
       margin: 0 0 12px;
+      font-weight: 700;
+    }
+
+    .panel h2:not(:first-child) {
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border-soft);
+    }
+
+    .subhead {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--faint);
+      margin: 0 0 10px;
     }
 
     .row {
@@ -115,38 +190,49 @@
     }
 
     .row label {
-      flex: 0 0 110px;
+      flex: 0 0 108px;
       color: var(--dim);
       font-size: 12px;
     }
 
     .row input[type=range] {
       flex: 1;
+      accent-color: var(--accent);
     }
 
     .row select {
       flex: 1;
+    }
+
+    select, input[type=text] {
       background: var(--off);
       color: var(--text);
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 4px 6px;
+      border-radius: var(--radius-sm);
+      padding: 5px 7px;
+      font-size: 12px;
+    }
+
+    select:focus, input:focus, button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     .value {
       width: 42px;
       text-align: right;
       font-variant-numeric: tabular-nums;
+      font-family: var(--mono);
       color: var(--dim);
-      font-size: 12px;
+      font-size: 11px;
     }
 
     .pad-diagram {
       display: flex;
       flex-wrap: wrap;
-      gap: 24px;
+      gap: 20px;
       justify-content: center;
-      margin-bottom: 16px;
+      margin-bottom: 4px;
     }
 
     .stick-box {
@@ -156,39 +242,80 @@
     .stick-box .label {
       font-size: 11px;
       color: var(--dim);
-      margin-top: 4px;
+      margin-top: 6px;
     }
 
     svg.stick {
-      background: #0f1116;
+      background: #0e1015;
       border-radius: 50%;
+      border: 1px solid var(--border-soft);
+    }
+
+    .stick-axis {
+      stroke: var(--border);
+      stroke-width: 1;
+    }
+
+    .stick-deadzone {
+      fill: rgba(139, 147, 163, 0.08);
+      stroke: var(--faint);
+      stroke-width: 1;
+      stroke-dasharray: 3 3;
     }
 
     .dot {
       fill: var(--accent);
+      transition: cx 40ms linear, cy 40ms linear;
+    }
+
+    .dot.pressed {
+      fill: var(--on);
+      r: 9px;
+    }
+
+    .pad-ring {
+      stroke: #2c313c;
+      stroke-width: 2px;
+      fill: none;
+      transition: stroke 0.1s, stroke-width 0.1s;
+    }
+
+    .pad-ring.touched {
+      stroke: var(--accent);
+      stroke-width: 3px;
+    }
+
+    .pad-ring.pressed {
+      stroke: var(--on);
+      stroke-width: 4px;
+    }
+
+    .btn-group {
+      margin-bottom: 4px;
     }
 
     .buttons-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
       gap: 6px;
       margin-bottom: 16px;
     }
 
     .btn-light {
-      padding: 6px 4px;
+      padding: 7px 4px;
       text-align: center;
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       background: var(--off);
       color: var(--dim);
       font-size: 11px;
       border: 1px solid var(--border);
-      transition: background 0.05s, color 0.05s;
+      transition: background 0.06s, color 0.06s, border-color 0.06s;
+      user-select: none;
     }
 
     .btn-light.on {
-      background: var(--on);
-      color: #05130a;
+      background: var(--on-soft);
+      color: var(--on);
       border-color: var(--on);
     }
 
@@ -202,36 +329,99 @@
       flex: 1;
     }
 
-    .bar-box .label {
-      font-size: 11px;
-      color: var(--dim);
+    .bar-box .label-row {
+      display: flex;
+      justify-content: space-between;
       margin-bottom: 4px;
     }
 
+    .bar-box .label {
+      font-size: 11px;
+      color: var(--dim);
+    }
+
+    .bar-box .pct {
+      font-size: 11px;
+      color: var(--faint);
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+
     .bar-track {
-      height: 14px;
-      background: #0f1116;
-      border-radius: 7px;
+      height: 12px;
+      background: #0e1015;
+      border-radius: 6px;
       overflow: hidden;
-      border: 1px solid var(--border);
+      border: 1px solid var(--border-soft);
     }
 
     .bar-fill {
       height: 100%;
-      background: var(--accent);
+      background: linear-gradient(90deg, var(--accent), #7ba3ff);
       width: 0%;
+      transition: width 60ms linear;
     }
 
-    .imu-readout {
+    .imu-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 20px;
+    }
+
+    .imu-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       font-size: 11px;
+    }
+
+    .imu-row .axis-label {
+      flex: 0 0 44px;
+      color: var(--faint);
+      font-family: var(--mono);
+    }
+
+    .imu-track {
+      flex: 1;
+      position: relative;
+      height: 10px;
+      background: #0e1015;
+      border-radius: 5px;
+      border: 1px solid var(--border-soft);
+      overflow: hidden;
+    }
+
+    .imu-track::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: var(--border);
+    }
+
+    .imu-fill {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--accent);
+      left: 50%;
+    }
+
+    .imu-val {
+      width: 46px;
+      text-align: right;
+      font-family: var(--mono);
       color: var(--dim);
       font-variant-numeric: tabular-nums;
-      white-space: pre;
     }
 
     .remap-list {
       max-height: 320px;
       overflow-y: auto;
+      margin-top: 8px;
     }
 
     .remap-row {
@@ -241,40 +431,96 @@
       margin-bottom: 6px;
     }
 
+    .remap-row.hidden {
+      display: none;
+    }
+
     .remap-row .name {
-      flex: 0 0 150px;
+      flex: 0 0 148px;
       font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .remap-row.bound .name {
+      color: var(--text);
+    }
+
+    .remap-row:not(.bound) .name {
+      color: var(--dim);
     }
 
     .remap-row select {
       flex: 1;
     }
 
+    #remap-filter {
+      width: 100%;
+      margin-bottom: 8px;
+    }
+
     .profile-controls {
       display: flex;
       gap: 6px;
-      margin-bottom: 14px;
+      margin-bottom: 4px;
       flex-wrap: wrap;
+    }
+
+    .profile-controls .hint {
+      font-size: 11px;
+      color: var(--faint);
+      margin: 6px 0 14px;
     }
 
     button {
       background: var(--off);
       color: var(--text);
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       padding: 6px 10px;
       cursor: pointer;
       font-size: 12px;
+      transition: border-color 0.1s, background 0.1s;
     }
 
     button:hover {
       border-color: var(--accent);
     }
 
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    button:disabled:hover {
+      border-color: var(--border);
+    }
+
     button.primary {
       background: var(--accent);
       color: #fff;
       border-color: var(--accent);
+    }
+
+    button.primary:hover {
+      filter: brightness(1.08);
+    }
+
+    button.danger:hover {
+      border-color: var(--bad);
+      color: var(--bad);
+    }
+
+    button.primary.dirty::after {
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin-left: 6px;
+      border-radius: 50%;
+      background: #fff;
+      vertical-align: middle;
     }
 
     select#profile-select {
@@ -285,6 +531,48 @@
     .rumble-row {
       display: flex;
       gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .toasts {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 100;
+      max-width: 320px;
+    }
+
+    .toast {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      font-size: 12px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+      animation: toast-in 0.15s ease-out;
+    }
+
+    .toast.error {
+      border-left-color: var(--bad);
+    }
+
+    .toast.success {
+      border-left-color: var(--on);
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .empty-note {
+      color: var(--faint);
+      font-size: 12px;
+      padding: 8px 0;
     }
   </style>
 </head>
@@ -292,9 +580,13 @@
 <body>
   <header>
     <h1>steam-controller-x</h1>
-    <span id="status">connecting…</span>
-    <span id="serial"></span>
-    <span id="signal"></span>
+    <span class="pill" id="status"><span class="dot"></span><span id="status-text">connecting…</span></span>
+    <span class="spacer"></span>
+    <span class="pill" id="serial"></span>
+    <span class="pill" id="signal">
+      <span class="signal-bars"><i></i><i></i><i></i><i></i></span>
+      <span id="signal-text"></span>
+    </span>
   </header>
   <main>
     <section class="panel" id="monitor">
@@ -304,6 +596,9 @@
         <div class="stick-box">
           <svg class="stick" width="110" height="110" viewBox="-110 -110 220 220">
             <circle r="100" fill="none" stroke="#2c313c" stroke-width="2" />
+            <circle id="dz-left_stick" class="stick-deadzone" r="0" cx="0" cy="0" />
+            <line class="stick-axis" x1="-100" y1="0" x2="100" y2="0" />
+            <line class="stick-axis" x1="0" y1="-100" x2="0" y2="100" />
             <circle id="dot-left_stick" class="dot" r="8" cx="0" cy="0" />
           </svg>
           <div class="label">Left Thumbstick</div>
@@ -311,20 +606,27 @@
         <div class="stick-box">
           <svg class="stick" width="110" height="110" viewBox="-110 -110 220 220">
             <circle r="100" fill="none" stroke="#2c313c" stroke-width="2" />
+            <circle id="dz-right_stick" class="stick-deadzone" r="0" cx="0" cy="0" />
+            <line class="stick-axis" x1="-100" y1="0" x2="100" y2="0" />
+            <line class="stick-axis" x1="0" y1="-100" x2="0" y2="100" />
             <circle id="dot-right_stick" class="dot" r="8" cx="0" cy="0" />
           </svg>
           <div class="label">Right Thumbstick</div>
         </div>
         <div class="stick-box">
           <svg class="stick" width="110" height="110" viewBox="-110 -110 220 220">
-            <circle r="100" fill="none" stroke="#2c313c" stroke-width="2" />
+            <circle id="ring-left_pad" class="pad-ring" r="100" />
+            <line class="stick-axis" x1="-100" y1="0" x2="100" y2="0" />
+            <line class="stick-axis" x1="0" y1="-100" x2="0" y2="100" />
             <circle id="dot-left_pad" class="dot" r="6" cx="0" cy="0" />
           </svg>
           <div class="label">Left Pad</div>
         </div>
         <div class="stick-box">
           <svg class="stick" width="110" height="110" viewBox="-110 -110 220 220">
-            <circle r="100" fill="none" stroke="#2c313c" stroke-width="2" />
+            <circle id="ring-right_pad" class="pad-ring" r="100" />
+            <line class="stick-axis" x1="-100" y1="0" x2="100" y2="0" />
+            <line class="stick-axis" x1="0" y1="-100" x2="0" y2="100" />
             <circle id="dot-right_pad" class="dot" r="6" cx="0" cy="0" />
           </svg>
           <div class="label">Right Pad</div>
@@ -333,45 +635,44 @@
 
       <div class="bars">
         <div class="bar-box">
-          <div class="label">Left Trigger</div>
+          <div class="label-row"><span class="label">Left Trigger</span><span class="pct" id="pct-left_trigger">0%</span></div>
           <div class="bar-track">
             <div class="bar-fill" id="bar-left_trigger"></div>
           </div>
         </div>
         <div class="bar-box">
-          <div class="label">Right Trigger</div>
+          <div class="label-row"><span class="label">Right Trigger</span><span class="pct" id="pct-right_trigger">0%</span></div>
           <div class="bar-track">
             <div class="bar-fill" id="bar-right_trigger"></div>
           </div>
         </div>
-        <div class="bar-box">
-          <div class="label">Grip</div>
-          <div class="bar-track">
-            <div class="bar-fill" id="bar-grip"></div>
-          </div>
-        </div>
       </div>
 
-      <div class="buttons-grid" id="buttons-grid"></div>
+      <div id="buttons-groups"></div>
 
-      <h2>IMU (raw, unmapped)</h2>
-      <div class="imu-readout" id="imu-readout">accel: -\ngyro: -</div>
+      <h2>IMU <span style="text-transform:none; letter-spacing:normal; color:var(--faint);">— raw, unmapped</span></h2>
+      <div class="imu-grid">
+        <div id="imu-accel"></div>
+        <div id="imu-gyro"></div>
+      </div>
     </section>
 
     <section class="panel" id="config">
       <h2>Profile</h2>
       <div class="profile-controls">
         <select id="profile-select"></select>
-        <button id="btn-load">Load</button>
-        <button id="btn-save" class="primary">Save</button>
-        <button id="btn-save-as">Save As…</button>
-        <button id="btn-delete">Delete</button>
+        <button id="btn-load" title="Load the selected profile from disk">Load</button>
+        <button id="btn-save" class="primary" title="Persist the active profile to disk">Save</button>
+        <button id="btn-save-as" title="Save the active profile under a new name">Save As…</button>
+        <button id="btn-delete" class="danger" title="Delete the selected profile from disk">Delete</button>
       </div>
+      <div class="hint" id="profile-hint">Changes preview live; click Save to persist.</div>
 
       <h2>Deadzone &amp; Curve</h2>
       <div id="axis-controls"></div>
 
       <h2>Button Remap</h2>
+      <input type="text" id="remap-filter" placeholder="Filter buttons…">
       <div class="remap-list" id="remap-list"></div>
 
       <h2>Rumble Test</h2>
@@ -384,12 +685,44 @@
     </section>
   </main>
 
+  <div class="toasts" id="toasts"></div>
+
   <script>
     const AXES = ["left_stick", "right_stick", "left_trigger", "right_trigger"];
+    const IMU_RANGE = 32768; // full i16 span; raw units are unconfirmed, so this is a rough visual scale only
+
+    // Rough physical grouping of logical buttons for a friendlier live-input
+    // readout. Anything not matched here falls into a trailing "Other" group.
+    const BUTTON_GROUPS = [
+      { label: "Face", match: ["a", "b", "x", "y"] },
+      { label: "D-Pad", match: ["dpad_up", "dpad_down", "dpad_left", "dpad_right"] },
+      { label: "Shoulders & Paddles", match: ["left_bumper", "right_bumper", "left_paddle_upper", "left_paddle_lower", "right_paddle_upper", "right_paddle_lower"] },
+      { label: "Sticks & Pads", match: ["left_stick_click", "right_stick_click", "left_stick_cap_touch", "right_stick_cap_touch", "left_pad_touch", "right_pad_touch", "left_pad_click", "right_pad_click"] },
+      { label: "System", match: ["start", "back_select_view", "guide", "dots"] },
+    ];
+
     let logicalButtons = [];
     let xinputButtons = [];
     let activeProfile = null;
     let saveTimer = null;
+    let dirty = false;
+
+    function setDirty(value) {
+      dirty = value;
+      const btn = document.getElementById("btn-save");
+      btn.classList.toggle("dirty", dirty);
+      document.getElementById("profile-hint").textContent = dirty
+        ? "Unsaved changes — click Save to persist to disk."
+        : "Changes preview live; click Save to persist.";
+    }
+
+    function toast(message, kind = "info") {
+      const el = document.createElement("div");
+      el.className = `toast ${kind}`;
+      el.textContent = message;
+      document.getElementById("toasts").appendChild(el);
+      setTimeout(() => el.remove(), 4000);
+    }
 
     async function api(path, options) {
       const res = await fetch(path, options);
@@ -406,13 +739,42 @@
 
     function renderSignal(dbm) {
       const el = document.getElementById("signal");
+      const text = document.getElementById("signal-text");
       el.classList.remove("good", "ok", "bad");
       if (dbm === null || dbm === undefined) {
-        el.textContent = "";
+        el.style.display = "none";
         return;
       }
-      el.textContent = `${dbm} dBm`;
+      el.style.display = "";
+      text.textContent = `${dbm} dBm`;
       el.classList.add(dbm >= -60 ? "good" : dbm >= -75 ? "ok" : "bad");
+    }
+
+    function renderImuAxes(container, prefix, values) {
+      const labels = ["X", "Y", "Z"];
+      for (let i = 0; i < 3; i++) {
+        let row = document.getElementById(`${prefix}-row-${i}`);
+        if (!row) {
+          row = document.createElement("div");
+          row.className = "imu-row";
+          row.id = `${prefix}-row-${i}`;
+          row.innerHTML = `<span class="axis-label">${prefix === "accel" ? "accel" : "gyro"} ${labels[i]}</span>` +
+            `<span class="imu-track"><span class="imu-fill" id="${prefix}-fill-${i}"></span></span>` +
+            `<span class="imu-val" id="${prefix}-val-${i}"></span>`;
+          container.appendChild(row);
+        }
+        const v = values[i];
+        const pct = Math.max(-50, Math.min(50, (v / IMU_RANGE) * 50));
+        const fill = document.getElementById(`${prefix}-fill-${i}`);
+        if (pct >= 0) {
+          fill.style.left = "50%";
+          fill.style.width = `${pct}%`;
+        } else {
+          fill.style.left = `${50 + pct}%`;
+          fill.style.width = `${-pct}%`;
+        }
+        document.getElementById(`${prefix}-val-${i}`).textContent = v;
+      }
     }
 
     function renderLive(msg) {
@@ -428,38 +790,67 @@
         dot.setAttribute("cx", x.toFixed(1));
         dot.setAttribute("cy", y.toFixed(1));
       }
+      document.getElementById("dot-left_stick").classList.toggle("pressed", !!raw.buttons.left_stick_click);
+      document.getElementById("dot-right_stick").classList.toggle("pressed", !!raw.buttons.right_stick_click);
 
-      document.getElementById("bar-left_trigger").style.width = `${(raw.left_trigger / 32767 * 100).toFixed(0)}%`;
-      document.getElementById("bar-right_trigger").style.width = `${(raw.right_trigger / 32767 * 100).toFixed(0)}%`;
-      document.getElementById("bar-grip").style.width = `${Math.min(100, raw.grip / 1.6).toFixed(0)}%`;
+      const leftPadTouched = !!raw.buttons.left_pad_touch;
+      const leftPadClicked = !!raw.buttons.left_pad_click;
+      const rightPadTouched = !!raw.buttons.right_pad_touch;
+      const rightPadClicked = !!raw.buttons.right_pad_click;
+
+      document.getElementById("dot-left_pad").classList.toggle("pressed", leftPadClicked);
+      document.getElementById("dot-left_pad").classList.toggle("touched", leftPadTouched);
+      const ringLeft = document.getElementById("ring-left_pad");
+      if (ringLeft) {
+        ringLeft.classList.toggle("touched", leftPadTouched);
+        ringLeft.classList.toggle("pressed", leftPadClicked);
+      }
+
+      document.getElementById("dot-right_pad").classList.toggle("pressed", rightPadClicked);
+      document.getElementById("dot-right_pad").classList.toggle("touched", rightPadTouched);
+      const ringRight = document.getElementById("ring-right_pad");
+      if (ringRight) {
+        ringRight.classList.toggle("touched", rightPadTouched);
+        ringRight.classList.toggle("pressed", rightPadClicked);
+      }
+
+      const ltPct = (raw.left_trigger / 32767 * 100);
+      const rtPct = (raw.right_trigger / 32767 * 100);
+      document.getElementById("bar-left_trigger").style.width = `${ltPct.toFixed(0)}%`;
+      document.getElementById("bar-right_trigger").style.width = `${rtPct.toFixed(0)}%`;
+      document.getElementById("pct-left_trigger").textContent = `${ltPct.toFixed(0)}%`;
+      document.getElementById("pct-right_trigger").textContent = `${rtPct.toFixed(0)}%`;
 
       for (const name of logicalButtons) {
         const el = document.getElementById(`btn-${name}`);
         if (el) el.classList.toggle("on", !!raw.buttons[name]);
       }
 
-      document.getElementById("imu-readout").textContent =
-        `accel: [${raw.imu.accel.join(", ")}]\ngyro:  [${raw.imu.gyro.join(", ")}]`;
+      renderImuAxes(document.getElementById("imu-accel"), "accel", raw.imu.accel);
+      renderImuAxes(document.getElementById("imu-gyro"), "gyro", raw.imu.gyro);
 
       void mapped; // mapped state currently only informs the config panel indirectly
     }
 
     async function refreshDeviceInfo() {
       const { serial } = await api("/api/device-info");
-      document.getElementById("serial").textContent = serial ? `S/N ${serial}` : "";
+      const el = document.getElementById("serial");
+      el.textContent = serial ? `S/N ${serial}` : "";
+      el.style.display = serial ? "" : "none";
     }
 
     function connectWs() {
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${proto}//${location.host}/ws`);
       const status = document.getElementById("status");
+      const statusText = document.getElementById("status-text");
       ws.onopen = () => {
-        status.textContent = "connected";
+        statusText.textContent = "connected";
         status.classList.add("connected");
         refreshDeviceInfo().catch((e) => console.error(e));
       };
       ws.onclose = () => {
-        status.textContent = "disconnected — retrying…";
+        statusText.textContent = "disconnected — retrying…";
         status.classList.remove("connected");
         setTimeout(connectWs, 1000);
       };
@@ -467,27 +858,59 @@
       ws.onmessage = (ev) => renderLive(JSON.parse(ev.data));
     }
 
+    function groupButtons(names) {
+      const remaining = new Set(names);
+      const groups = [];
+      for (const g of BUTTON_GROUPS) {
+        const members = g.match.filter((n) => remaining.has(n));
+        members.forEach((n) => remaining.delete(n));
+        if (members.length) groups.push({ label: g.label, members });
+      }
+      if (remaining.size) groups.push({ label: "Other", members: [...remaining] });
+      return groups;
+    }
+
     function buildButtonsGrid() {
-      const grid = document.getElementById("buttons-grid");
-      grid.innerHTML = "";
-      for (const name of logicalButtons) {
-        const div = document.createElement("div");
-        div.className = "btn-light";
-        div.id = `btn-${name}`;
-        div.textContent = name.replaceAll("_", " ");
-        grid.appendChild(div);
+      const container = document.getElementById("buttons-groups");
+      container.innerHTML = "";
+      for (const group of groupButtons(logicalButtons)) {
+        const wrap = document.createElement("div");
+        wrap.className = "btn-group";
+        const head = document.createElement("div");
+        head.className = "subhead";
+        head.textContent = group.label;
+        const grid = document.createElement("div");
+        grid.className = "buttons-grid";
+        for (const name of group.members) {
+          const div = document.createElement("div");
+          div.className = "btn-light";
+          div.id = `btn-${name}`;
+          div.textContent = name.replaceAll("_", " ");
+          grid.appendChild(div);
+        }
+        wrap.appendChild(head);
+        wrap.appendChild(grid);
+        container.appendChild(wrap);
       }
     }
 
     function debounceSave() {
+      setDirty(true);
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         api("/api/active-profile", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(activeProfile),
-        }).catch((e) => console.error(e));
+        }).catch((e) => { console.error(e); toast(`Preview update failed: ${e.message}`, "error"); });
       }, 150);
+    }
+
+    function updateDeadzoneRing(axis) {
+      const dz = document.getElementById(`dz-${axis}`);
+      if (!dz) return;
+      const radius = 85; // matches the stick dot's max travel radius
+      dz.setAttribute("r", (activeProfile[axis].deadzone * radius).toFixed(1));
     }
 
     function buildAxisControls() {
@@ -506,6 +929,7 @@
         dzInput.addEventListener("input", () => {
           activeProfile[axis].deadzone = parseFloat(dzInput.value);
           dzVal.textContent = activeProfile[axis].deadzone.toFixed(2);
+          updateDeadzoneRing(axis);
           debounceSave();
         });
 
@@ -523,6 +947,14 @@
 
         container.appendChild(dzRow);
         container.appendChild(curveRow);
+        updateDeadzoneRing(axis);
+      }
+    }
+
+    function applyRemapFilter() {
+      const q = document.getElementById("remap-filter").value.trim().toLowerCase();
+      for (const row of document.querySelectorAll(".remap-row")) {
+        row.classList.toggle("hidden", q.length > 0 && !row.dataset.name.includes(q));
       }
     }
 
@@ -533,6 +965,7 @@
       for (const button of logicalButtons) {
         const row = document.createElement("div");
         row.className = "remap-row";
+        row.dataset.name = button.replaceAll("_", " ");
         const name = document.createElement("div");
         name.className = "name";
         name.textContent = button.replaceAll("_", " ");
@@ -548,17 +981,20 @@
           select.appendChild(opt);
         }
         select.value = bound.get(button) ?? "";
+        row.classList.toggle("bound", !!select.value);
         select.addEventListener("change", () => {
           activeProfile.bindings = activeProfile.bindings.filter((b) => b.button !== button);
           if (select.value) {
             activeProfile.bindings.push({ button, target: select.value });
           }
+          row.classList.toggle("bound", !!select.value);
           debounceSave();
         });
         row.appendChild(name);
         row.appendChild(select);
         list.appendChild(row);
       }
+      applyRemapFilter();
     }
 
     async function refreshProfileSelect() {
@@ -572,6 +1008,8 @@
         if (name === activeProfile.name) opt.selected = true;
         select.appendChild(opt);
       }
+      document.getElementById("btn-load").disabled = names.length === 0;
+      document.getElementById("btn-delete").disabled = names.length === 0;
     }
 
     async function loadActiveProfile() {
@@ -579,6 +1017,12 @@
       buildAxisControls();
       buildRemapList();
       await refreshProfileSelect();
+      setDirty(false);
+    }
+
+    function confirmDiscard(action) {
+      if (!dirty) return true;
+      return confirm(`You have unsaved changes to "${activeProfile.name}". ${action} and discard them?`);
     }
 
     async function init() {
@@ -589,43 +1033,71 @@
       await refreshDeviceInfo();
       connectWs();
 
+      document.getElementById("remap-filter").addEventListener("input", applyRemapFilter);
+
       document.getElementById("btn-save").addEventListener("click", () => {
-        api("/api/active-profile/save", { method: "POST" }).then(refreshProfileSelect).catch((e) => alert(e));
+        api("/api/active-profile/save", { method: "POST" })
+          .then(() => { setDirty(false); toast(`Saved "${activeProfile.name}".`, "success"); return refreshProfileSelect(); })
+          .catch((e) => toast(`Save failed: ${e.message}`, "error"));
       });
       document.getElementById("btn-save-as").addEventListener("click", async () => {
         const name = prompt("Profile name:", activeProfile.name);
         if (!name) return;
-        activeProfile.name = name;
-        await api("/api/active-profile", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(activeProfile),
-        });
-        await api("/api/active-profile/save", { method: "POST" });
-        await refreshProfileSelect();
+        try {
+          activeProfile.name = name;
+          await api("/api/active-profile", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(activeProfile),
+          });
+          await api("/api/active-profile/save", { method: "POST" });
+          await refreshProfileSelect();
+          setDirty(false);
+          toast(`Saved as "${name}".`, "success");
+        } catch (e) {
+          toast(`Save As failed: ${e.message}`, "error");
+        }
       });
       document.getElementById("btn-load").addEventListener("click", async () => {
         const name = document.getElementById("profile-select").value;
         if (!name) return;
-        await api(`/api/profiles/${encodeURIComponent(name)}/load`, { method: "POST" });
-        await loadActiveProfile();
+        if (!confirmDiscard("Load the selected profile")) return;
+        try {
+          await api(`/api/profiles/${encodeURIComponent(name)}/load`, { method: "POST" });
+          await loadActiveProfile();
+          toast(`Loaded "${name}".`, "success");
+        } catch (e) {
+          toast(`Load failed: ${e.message}`, "error");
+        }
       });
       document.getElementById("btn-delete").addEventListener("click", async () => {
         const name = document.getElementById("profile-select").value;
-        if (!name || !confirm(`Delete profile "${name}"?`)) return;
-        await api(`/api/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
-        await refreshProfileSelect();
+        if (!name || !confirm(`Delete profile "${name}"? This cannot be undone.`)) return;
+        try {
+          await api(`/api/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
+          await refreshProfileSelect();
+          toast(`Deleted "${name}".`, "success");
+        } catch (e) {
+          toast(`Delete failed: ${e.message}`, "error");
+        }
       });
       for (const btn of document.querySelectorAll(".rumble-row button")) {
         btn.addEventListener("click", () => {
-          api(`/api/rumble/${btn.dataset.motor}`, { method: "POST" }).catch((e) => alert(e));
+          api(`/api/rumble/${btn.dataset.motor}`, { method: "POST" }).catch((e) => toast(`Rumble failed: ${e.message}`, "error"));
         });
       }
+
+      window.addEventListener("beforeunload", (e) => {
+        if (!dirty) return;
+        e.preventDefault();
+        e.returnValue = "";
+      });
     }
 
     init().catch((e) => {
       console.error(e);
-      document.getElementById("status").textContent = `init failed: ${e.message}`;
+      document.getElementById("status-text").textContent = `init failed: ${e.message}`;
+      toast(`Failed to initialize: ${e.message}`, "error");
     });
   </script>
 </body>

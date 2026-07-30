@@ -26,9 +26,6 @@
 //!   (which of the 3 accel/gyro channels is X/Y/Z or pitch/roll/yaw) are
 //!   *not* confirmed beyond gyro channel 3 being the best candidate for
 //!   yaw.
-//! - A capacitive grip-squeeze pressure sensor (single byte), though it
-//!   appears to combine both grips into one reading rather than reporting
-//!   them independently.
 //! - The left stick's capacitive cap-touch sensor (counterpart to
 //!   [`crate::ButtonFlags::RIGHT_STICK_CAP_TOUCH`]) — but exposed
 //!   completely differently: not a bit in the button bitmask at all, just
@@ -42,6 +39,27 @@
 //! - Left touchpad click (only the right pad's click signal was isolated;
 //!   the left may be software-synthesized rather than exposed over HID).
 //! - Battery level, connection-type/status bits.
+//! - An analog capacitive grip-squeeze *pressure* reading. Byte 32 was
+//!   originally logged as this (see `git blame`), based on a single
+//!   before/after squeeze test that isn't safe to trust: a dedicated probe
+//!   (`sc-hid`'s `grip_probe` example) on 2026-07-29 showed byte 32 free-runs
+//!   on its own at a steady ~14Hz regardless of touch, sweeping its full
+//!   0..=255 range and wrapping roughly every 18s — a counter, not a
+//!   pressure sensor. It's tracked as `offset::UNKNOWN_COUNTER_32` /
+//!   [`PadState::unknown_counter_32`] now instead of being surfaced as grip.
+//!   A proper isolation test to find the real byte (`sc-hid`'s
+//!   `isolate_grip_byte` example: idle baseline / sustained squeeze /
+//!   release, diffing per-byte value ranges across all three phases so a
+//!   real signal can't be confused with a byte that's simply always
+//!   drifting) also ran on 2026-07-29 and found **no byte in this report
+//!   that shifts to a new stable range during a squeeze and returns after
+//!   release** — so either the pressure signal isn't in report `0x42` at
+//!   all (maybe one of the still-unexamined report IDs from
+//!   `feature_probe.rs`?), or it needs a firmer/longer squeeze than that
+//!   run used to show up cleanly. The `0x20` bit in `offset::STATUS` (see
+//!   [`crate::ButtonFlags::LEFT_STICK_CAP_TOUCH`]'s doc comment) remains a
+//!   separate, independently-confirmed *digital* (on/off, not pressure)
+//!   grip-squeeze signal and is unaffected by any of this.
 //! - Whether/how the capacitive stick sensors suppress the co-located
 //!   touchpad while a stick is gripped (mentioned by the hardware owner;
 //!   the decode-side flags now correctly fire in combination with grip,
@@ -101,7 +119,12 @@ mod offset {
     pub const LEFT_PAD_Y: usize = 20; // i16 LE, (0,0) while untouched
     pub const RIGHT_PAD_X: usize = 24; // i16 LE, (0,0) while untouched
     pub const RIGHT_PAD_Y: usize = 26; // i16 LE, (0,0) while untouched
-    pub const GRIP: usize = 32; // u8, combined grip-squeeze pressure
+    /// u8. NOT grip pressure — despite the name this byte was originally
+    /// captured under, `sc-hid`'s `grip_probe` example confirmed
+    /// (2026-07-29) it free-runs at a steady ~14Hz regardless of touch,
+    /// full-range 0..=255, wrapping every ~18s. Real identity unknown; see
+    /// the module doc comment's "Not yet confirmed" section.
+    pub const UNKNOWN_COUNTER_32: usize = 32;
     pub const ACCEL: usize = 34; // 3 x i16 LE
     pub const GYRO: usize = 40; // 3 x i16 LE
 }
@@ -157,8 +180,15 @@ pub fn decode(report: &[u8]) -> Result<PadState, DecodeError> {
     let mut buttons = ButtonFlags::from_bits_truncate(
         (raw[0] as u32) | ((raw[1] as u32) << 8) | ((raw[2] as u32) << 16),
     );
-    if report[offset::STATUS] & 0x01 != 0 {
+    let status = report[offset::STATUS];
+    if status & 0x01 != 0 {
         buttons |= ButtonFlags::LEFT_STICK_CAP_TOUCH;
+    }
+    if status & 0x02 != 0 {
+        buttons |= ButtonFlags::LEFT_PAD_TOUCH;
+    }
+    if status & 0x04 != 0 {
+        buttons |= ButtonFlags::LEFT_PAD_CLICK;
     }
 
     let left_trigger = read_u16(report, offset::LEFT_TRIGGER)?;
@@ -176,12 +206,15 @@ pub fn decode(report: &[u8]) -> Result<PadState, DecodeError> {
         x: read_i16(report, offset::LEFT_PAD_X)?,
         y: read_i16(report, offset::LEFT_PAD_Y)?,
     };
+    if left_pad.x != 0 || left_pad.y != 0 {
+        buttons |= ButtonFlags::LEFT_PAD_TOUCH;
+    }
     let right_pad = StickAxis {
         x: read_i16(report, offset::RIGHT_PAD_X)?,
         y: read_i16(report, offset::RIGHT_PAD_Y)?,
     };
 
-    let grip = report[offset::GRIP];
+    let unknown_counter_32 = report[offset::UNKNOWN_COUNTER_32];
 
     let imu = ImuSample {
         accel: read_i16_triplet(report, offset::ACCEL)?,
@@ -197,7 +230,7 @@ pub fn decode(report: &[u8]) -> Result<PadState, DecodeError> {
         right_stick,
         left_pad,
         right_pad,
-        grip,
+        unknown_counter_32,
         imu,
     })
 }
@@ -250,7 +283,7 @@ mod tests {
             .copy_from_slice(&(500i16).to_le_bytes());
         r[offset::RIGHT_PAD_Y..offset::RIGHT_PAD_Y + 2]
             .copy_from_slice(&(-500i16).to_le_bytes());
-        r[offset::GRIP] = 130;
+        r[offset::UNKNOWN_COUNTER_32] = 130;
         for (i, v) in [10i16, 20, 30].iter().enumerate() {
             r[offset::ACCEL + i * 2..offset::ACCEL + i * 2 + 2]
                 .copy_from_slice(&v.to_le_bytes());
@@ -286,9 +319,9 @@ mod tests {
     }
 
     #[test]
-    fn decodes_grip_and_imu() {
+    fn decodes_unknown_counter_32_and_imu() {
         let state = decode(&synthetic_report()).unwrap();
-        assert_eq!(state.grip, 130);
+        assert_eq!(state.unknown_counter_32, 130);
         assert_eq!(state.imu.accel, [10, 20, 30]);
         assert_eq!(state.imu.gyro, [40, 50, 60]);
     }
@@ -332,6 +365,26 @@ mod tests {
         let state = decode(&r).unwrap();
         assert!(state.buttons.contains(ButtonFlags::RIGHT_STICK_CLICK));
         assert!(!state.buttons.contains(ButtonFlags::RIGHT_PAD_CLICK));
+    }
+
+    #[test]
+    fn decodes_left_pad_touch_and_click() {
+        let mut r = synthetic_report();
+        // Clear synthetic non-zero pad position
+        r[offset::LEFT_PAD_X..offset::LEFT_PAD_X + 2].copy_from_slice(&0i16.to_le_bytes());
+        r[offset::LEFT_PAD_Y..offset::LEFT_PAD_Y + 2].copy_from_slice(&0i16.to_le_bytes());
+
+        // Status byte 0x02 maps to LEFT_PAD_TOUCH
+        r[offset::STATUS] = 0x02;
+        let state_touch = decode(&r).unwrap();
+        assert!(state_touch.buttons.contains(ButtonFlags::LEFT_PAD_TOUCH));
+        assert!(!state_touch.buttons.contains(ButtonFlags::LEFT_PAD_CLICK));
+
+        // Status byte 0x04 (or 0x06 = 0x02 | 0x04) maps to LEFT_PAD_CLICK
+        r[offset::STATUS] = 0x06;
+        let state_click = decode(&r).unwrap();
+        assert!(state_click.buttons.contains(ButtonFlags::LEFT_PAD_TOUCH));
+        assert!(state_click.buttons.contains(ButtonFlags::LEFT_PAD_CLICK));
     }
 
     #[test]

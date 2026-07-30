@@ -82,9 +82,6 @@ Confirmed:
   near zero once still). Exact per-channel axis semantics (which channel
   is X/Y/Z or pitch/roll/yaw) are *not* confirmed beyond one gyro channel
   being the best candidate for yaw.
-- A capacitive grip-squeeze pressure sensor — but it appears to be a
-  single combined reading, not independent per-hand sensors (squeezing
-  either grip alone moved the same byte by about the same amount).
 - The left stick's capacitive cap-touch sensor (counterpart to the right
   stick's) — but encoded completely differently: not a bit in the normal
   button bitmask at all, just a "status/mode" byte (report offset 5, also
@@ -174,6 +171,32 @@ Not yet implemented / unconfirmed (left out rather than guessed):
     byte 1, `0x43` byte 8) and one very short-lived, unreproduced feature-
     report response that might be worth revisiting if it starts firing
     reliably under some as-yet-unidentified condition.
+- **Grip-squeeze pressure (analog).** Investigated (2026-07-29) and not
+  found in report `0x42` — written up here for the same reason as the
+  battery investigation above:
+  - Report byte 32 was originally logged as this, based on a single
+    before/after squeeze test. A dedicated probe
+    (`crates/sc-hid/examples/grip_probe.rs`) later watched it continuously
+    with nobody touching the controller at all and found it free-runs on
+    its own at a steady ~14Hz, sweeping its full `0..=255` range and
+    wrapping every ~18s — a counter, not a pressure reading. (This is also
+    what was causing the web UI's old "Grip" meter to climb to 100%,
+    plateau for several seconds, and reset in a loop on its own — the
+    meter's `min(100%, byte / 1.6)` clamp was hiding the counter's climb
+    from 160-255 as a flat 100%, then it snapped to 0% on wraparound. The
+    meter has been removed and the field renamed to `unknown_counter_32`.)
+  - A proper isolation test (`crates/sc-hid/examples/isolate_grip_byte.rs`:
+    idle baseline → sustained squeeze → release, diffing every byte's
+    value range across all three phases so a real signal can't be confused
+    with a byte that's simply always drifting) found **no byte in report
+    `0x42` that shifts to a new stable range during a squeeze and returns
+    to baseline after release**. Either the pressure signal isn't in this
+    report at all (possibly one of the still-undecoded report IDs `0x40`,
+    `0x41`, `0x43`, `0x44`, `0x45`, `0x79` — see `feature_probe.rs`), or it
+    needs a firmer/longer squeeze than that run used to show up cleanly.
+  - The *digital* grip-squeeze signal (squeezed or not, no gradient) is
+    unaffected by any of this and remains confirmed — see the left stick's
+    cap-touch sensor entry above (`status` byte bit `0x20`).
 - Whether/how gripping a stick suppresses its co-located touchpad (the
   capacitive sensor above is presumably involved, per the hardware
   owner — not independently verified beyond detecting the sensor itself).
@@ -208,7 +231,7 @@ correctly on your hardware, re-derive the layout with the same method:
 ## Layout
 
 - `crates/sc-protocol` — pure decoding logic, no I/O (`report.rs` holds the wire format).
-- `crates/sc-hid` — USB HID device discovery/read loop plus output-report writing (rumble), via `hidapi`. `examples/` holds scratch protocol-investigation tools (not part of the crate's public surface) — `feature_probe.rs` probes HID feature reports and sweeps candidate device paths; `battery_drain_monitor.rs` drives continuous rumble while watching for report/byte changes over long unattended runs. See both files' module docs, and the "Protocol status" battery write-up above, for what they found.
+- `crates/sc-hid` — USB HID device discovery/read loop plus output-report writing (rumble), via `hidapi`. `examples/` holds scratch protocol-investigation tools (not part of the crate's public surface) — `feature_probe.rs` probes HID feature reports and sweeps candidate device paths; `battery_drain_monitor.rs` drives continuous rumble while watching for report/byte changes over long unattended runs; `grip_probe.rs` watches a single byte over time to tell a real sensor reading apart from a free-running counter; `isolate_grip_byte.rs` diffs every byte across an idle/squeeze/release cycle to isolate a real touch-correlated signal. See each file's module docs, and the "Protocol status" battery and grip-squeeze write-ups above, for what they found.
 - `crates/sc-xinput` — the `VirtualPad` trait, `XInputState`/`XInputButtons` (the fully-mapped, ready-to-send shape), plus the `windows_vigem` and `linux_uinput` backends. Backends are purely mechanical — they don't know about physical buttons at all.
 - `crates/sc-config` — decides which physical control drives which XInput output: deadzone/response-curve shaping (`AxisSettings`), the button remap table (`LogicalButton` → `XInputButton`), and `Profile`/`ProfileStore` for saving/loading named configs as TOML.
 - `crates/sc-adapter` — the binary: CLI, main loop, logging, and (opt-in) the `web` module serving the local monitoring/config UI.
@@ -283,8 +306,14 @@ hardware, including confirming button/pad state streams correctly into the
 web UI over the wireless connection. The wire format itself is otherwise
 identical to the wired connection — same report ID, same byte layout.
 
-On Linux, `/dev/uinput` access requires either running as root or the udev
-rule `scripts/install-linux.sh` installs for you
+On Linux, this needs the `uinput` kernel module loaded (`sudo modprobe
+uinput`; `scripts/install-linux.sh` offers to do this and to persist it
+across reboots via `/etc/modules-load.d/uinput.conf`) — if it isn't,
+`sc-adapter` fails immediately with "Error: Device not found." before it
+even tries to open the physical controller, which reads a lot like a
+controller-detection failure but isn't one. It also needs `/dev/uinput`
+access, via either running as root or the udev rule
+`scripts/install-linux.sh` installs for you
 (`scripts/60-steam-controller-x-uinput.rules`):
 
 ```
@@ -405,7 +434,7 @@ Opens a local web server (default `http://127.0.0.1:61302`, override with
 `--web-port`/`--web-bind`) alongside the normal adapter loop:
 
 - **Live monitoring**: every button, both sticks, both touchpads, both
-  triggers, grip pressure, and raw IMU values, streamed over a WebSocket.
+  triggers, and raw IMU values, streamed over a WebSocket.
   The header also shows the paired controller's serial number and (over
   the wireless puck) live RF signal strength in dBm — see "Protocol
   status" above for where both come from.
@@ -432,10 +461,13 @@ reachable from the network.
 
 ## Known limitations
 
-- Gyro, battery, and grip-squeeze precision (per-side) aren't
-  decoded/implemented yet (see "Protocol status" above).
+- Gyro and battery aren't decoded/implemented yet; analog grip-squeeze
+  pressure was investigated and not found to exist in the main input
+  report at all (see "Protocol status" above). Only a binary
+  squeezed/not-squeezed grip signal is available, per side is not
+  distinguished.
 - Left touchpad click isn't confirmed.
-- Grip pressure, IMU data, and touchpad *positions* (the X/Y coordinates)
+- IMU data and touchpad *positions* (the X/Y coordinates)
   have no standard Xbox 360 equivalent and no remapping path at all — they
   aren't part of the button table and are never forwarded, regardless of
   profile settings. (Touchpad touch/click *flags* are different: they're

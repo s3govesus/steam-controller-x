@@ -118,7 +118,7 @@ fn pad_state_json(state: &PadState) -> Value {
         "right_stick": { "x": state.right_stick.x, "y": state.right_stick.y },
         "left_pad": { "x": state.left_pad.x, "y": state.left_pad.y },
         "right_pad": { "x": state.right_pad.x, "y": state.right_pad.y },
-        "grip": state.grip,
+        "unknown_counter_32": state.unknown_counter_32,
         "imu": { "accel": state.imu.accel, "gyro": state.imu.gyro },
     })
 }

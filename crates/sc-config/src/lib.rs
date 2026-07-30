@@ -50,6 +50,8 @@ pub enum LogicalButton {
     /// (the right touchpad's press-force click) — see
     /// [`sc_protocol::ButtonFlags::RIGHT_STICK_CLICK`].
     RightStickClick,
+    LeftPadTouch,
+    LeftPadClick,
     RightPadTouch,
     RightPadClick,
     DpadUp,
@@ -63,7 +65,7 @@ pub enum LogicalButton {
 }
 
 impl LogicalButton {
-    pub const ALL: [LogicalButton; 24] = [
+    pub const ALL: [LogicalButton; 26] = [
         LogicalButton::A,
         LogicalButton::B,
         LogicalButton::X,
@@ -78,6 +80,8 @@ impl LogicalButton {
         LogicalButton::LeftStickCapTouch,
         LogicalButton::LeftStickClick,
         LogicalButton::RightStickClick,
+        LogicalButton::LeftPadTouch,
+        LogicalButton::LeftPadClick,
         LogicalButton::RightPadTouch,
         LogicalButton::RightPadClick,
         LogicalButton::DpadUp,
@@ -106,6 +110,8 @@ impl LogicalButton {
             LogicalButton::LeftStickCapTouch => ButtonFlags::LEFT_STICK_CAP_TOUCH,
             LogicalButton::LeftStickClick => ButtonFlags::LEFT_STICK_CLICK,
             LogicalButton::RightStickClick => ButtonFlags::RIGHT_STICK_CLICK,
+            LogicalButton::LeftPadTouch => ButtonFlags::LEFT_PAD_TOUCH,
+            LogicalButton::LeftPadClick => ButtonFlags::LEFT_PAD_CLICK,
             LogicalButton::RightPadTouch => ButtonFlags::RIGHT_PAD_TOUCH,
             LogicalButton::RightPadClick => ButtonFlags::RIGHT_PAD_CLICK,
             LogicalButton::DpadUp => ButtonFlags::DPAD_UP,
@@ -392,7 +398,7 @@ mod tests {
             right_stick: Default::default(),
             left_pad: Default::default(),
             right_pad: Default::default(),
-            grip: 0,
+            unknown_counter_32: 0,
             imu: Default::default(),
         }
     }
