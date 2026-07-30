@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `sc-hid`: two scratch diagnostic examples for the grip-squeeze
+  investigation below — `grip_probe.rs` (watches one byte over time,
+  distinguishing a real sensor reading from a free-running counter) and
+  `isolate_grip_byte.rs` (diffs every byte's value range across an
+  idle/squeeze/release cycle to isolate a real touch-correlated signal).
+
+### Fixed
+
+- `sc-protocol`: report byte 32 was mislabeled `grip` (analog grip-squeeze
+  pressure, "49 unsqueezed to 130+ squeezed") based on a single before/after
+  squeeze test. A dedicated probe found it actually free-runs on its own at
+  a steady ~14Hz regardless of touch, sweeping its full `0..=255` range and
+  wrapping every ~18s — this is also what was making the web UI's "Grip"
+  meter climb to 100%, plateau for several seconds, and reset in a loop
+  even with nobody touching the controller. Renamed to
+  `PadState::unknown_counter_32` and pulled the misleading meter from the
+  web UI entirely; see "Investigated" below for the full write-up.
+
+### Investigated
+
+- Grip-squeeze pressure (analog): re-investigated (2026-07-29) after the
+  fix above. A proper isolation test (idle baseline / sustained squeeze /
+  release, diffed per-byte) found no byte in report `0x42` that shifts to a
+  new stable range during a squeeze and returns to baseline after release —
+  so no analog pressure signal was found in this report at all. Only the
+  already-confirmed *digital* squeezed/not-squeezed bit remains reliable.
+  See the "Protocol status" section of the README for the full write-up.
+
+### Documentation
+
+- Noted in the README that an unloaded `uinput` kernel module makes
+  `sc-adapter` fail immediately with "Error: Device not found." — from the
+  virtual-pad creation step, before it ever tries the physical controller,
+  so it reads like a controller-detection failure (and can make
+  `scripts/run.sh` look like the culprit) but isn't one.
+
+## [0.1.1] - 2026-07-25
+
+Initial tagged release. (Retroactively added to the changelog — this
+content sat undocumented under a stale "Unreleased" heading through the
+0.1.2 release; see 0.1.3's cleanup above.)
+
+### Added
+
 - `sc-protocol`: pure decoding logic for the new (2026) Steam Controller's
   raw USB HID input reports (report ID `0x42`), reverse-engineered against
   real hardware — all 21 digital buttons, both trigger axes, two sticks,
@@ -46,11 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PID and launch `sc-adapter` without needing to pass `--pid` by hand.
 - `tools/pygame_test.py`: standalone SDL2-based script for exercising the
   virtual pad independent of this project's own code.
-- `sc-hid`: two scratch diagnostic examples for the grip-squeeze
-  investigation below — `grip_probe.rs` (watches one byte over time,
-  distinguishing a real sensor reading from a free-running counter) and
-  `isolate_grip_byte.rs` (diffs every byte's value range across an
-  idle/squeeze/release cycle to isolate a real touch-correlated signal).
 
 ### Changed
 
@@ -58,35 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   range) to avoid clashing with other local dev servers/proxies that
   commonly default to `8080`/"http-alt".
 
-### Fixed
-
-- `sc-protocol`: report byte 32 was mislabeled `grip` (analog grip-squeeze
-  pressure, "49 unsqueezed to 130+ squeezed") based on a single before/after
-  squeeze test. A dedicated probe found it actually free-runs on its own at
-  a steady ~14Hz regardless of touch, sweeping its full `0..=255` range and
-  wrapping every ~18s — this is also what was making the web UI's "Grip"
-  meter climb to 100%, plateau for several seconds, and reset in a loop
-  even with nobody touching the controller. Renamed to
-  `PadState::unknown_counter_32` and pulled the misleading meter from the
-  web UI entirely; see "Investigated" below for the full write-up.
-
-### Investigated
-
-- Grip-squeeze pressure (analog): re-investigated (2026-07-29) after the
-  fix above. A proper isolation test (idle baseline / sustained squeeze /
-  release, diffed per-byte) found no byte in report `0x42` that shifts to a
-  new stable range during a squeeze and returns to baseline after release —
-  so no analog pressure signal was found in this report at all. Only the
-  already-confirmed *digital* squeezed/not-squeezed bit remains reliable.
-  See the "Protocol status" section of the README for the full write-up.
-
 ### Documentation
 
-- Noted in the README that an unloaded `uinput` kernel module makes
-  `sc-adapter` fail immediately with "Error: Device not found." — from the
-  virtual-pad creation step, before it ever tries the physical controller,
-  so it reads like a controller-detection failure (and can make
-  `scripts/run.sh` look like the culprit) but isn't one.
 - Added a disclaimer to the README: this project speaks raw,
   reverse-engineered HID reports (including motor-driving output reports)
   and is provided with no warranty — used at your own risk.
@@ -143,5 +155,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never reproduced across 21 follow-up attempts. Closed out as
   unresolved — documented rather than guessed at.
 
-[Unreleased]: https://github.com/s3govesus/steam-controller-x/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/s3govesus/steam-controller-x/releases/tag/v0.1.2
+[0.1.3]: https://github.com/s3govesus/steam-controller-x/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/s3govesus/steam-controller-x/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/s3govesus/steam-controller-x/releases/tag/v0.1.1
